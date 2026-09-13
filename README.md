@@ -145,3 +145,5 @@ The next major systems are likely to include:
 - Risk and failure during test runs
 - More useful run summaries and visual telemetry
 - Optional BeamNG or Unity integration
+- If we can get Unity/Gary's Mod/BeamNG working - the record attempt will be driven by the player.
+
