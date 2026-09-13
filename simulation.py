@@ -1,0 +1,149 @@
+"""Basic time-and-distance simulation for a land-speed run."""
+
+from dataclasses import dataclass
+
+
+METERS_PER_MILE = 1609.344
+HORSEPOWER_IN_WATTS = 745.7
+AIR_DENSITY = 1.2
+
+
+@dataclass
+class TelemetrySample:
+    time_seconds: float
+    distance_miles: float
+    speed_mph: float
+    acceleration_g: float
+    phase: str
+
+
+@dataclass
+class SimulationResult:
+    track_miles: float
+    measured_mile_time_seconds: float
+    measured_mile_speed_mph: float
+    peak_speed_mph: float
+    total_time_seconds: float
+    completed: bool
+    telemetry: list[TelemetrySample]
+
+
+def calculate_drag_force(vehicle, speed_m_per_second):
+    """Return aerodynamic drag in newtons at the given speed."""
+    return 0.5 * vehicle.cd * AIR_DENSITY * speed_m_per_second**2 * vehicle.area
+
+
+def run_simulation(
+    vehicle,
+    track_miles=10.0,
+    measured_mile_start=4.0,
+    measured_mile_length=1.0,
+    time_step=0.1,
+):
+    """Simulate acceleration, a measured mile, and braking on a track."""
+    if track_miles <= 0:
+        raise ValueError("track_miles must be greater than zero")
+    if measured_mile_start < 0 or measured_mile_length <= 0:
+        raise ValueError("measured mile must have a positive length and start")
+    if measured_mile_start + measured_mile_length > track_miles:
+        raise ValueError("measured mile must fit within the track")
+    if (
+        vehicle.mass <= 0
+        or vehicle.power <= 0
+        or vehicle.cd <= 0
+        or vehicle.area <= 0
+        or vehicle.traction_coefficient <= 0
+    ):
+        raise ValueError("vehicle dimensions, power, mass, and traction must be greater than zero")
+
+    rolling_resistance = 0.015
+    drivetrain_efficiency = 0.85
+    braking_acceleration = 0.05 * 9.81
+    track_distance = track_miles * METERS_PER_MILE
+    measured_start = measured_mile_start * METERS_PER_MILE
+    measured_end = (measured_mile_start + measured_mile_length) * METERS_PER_MILE
+    power_watts = vehicle.power * HORSEPOWER_IN_WATTS * drivetrain_efficiency
+    maximum_traction_force = vehicle.traction_coefficient * vehicle.mass * 9.81
+
+    distance = 0.0
+    speed = 0.0
+    elapsed = 0.0
+    peak_speed = 0.0
+    measured_start_time = None
+    measured_end_time = None
+    next_telemetry_time = 1.0
+    telemetry = [TelemetrySample(0.0, 0.0, 0.0, 0.0, "accelerating")]
+
+    while distance < track_distance and elapsed < 3600:
+        previous_distance = distance
+        previous_speed = speed
+
+        if distance < measured_end:
+            drag_force = calculate_drag_force(vehicle, speed)
+            rolling_force = vehicle.mass * 9.81 * rolling_resistance
+            power_limited_force = power_watts / max(speed, 1.0)
+            available_force = min(power_limited_force, maximum_traction_force)
+            acceleration = (available_force - drag_force - rolling_force) / vehicle.mass
+            speed = max(0.0, speed + acceleration * time_step)
+        else:
+            drag_acceleration = calculate_drag_force(vehicle, speed) / vehicle.mass
+            rolling_acceleration = 9.81 * rolling_resistance
+            total_deceleration = (
+                braking_acceleration + drag_acceleration + rolling_acceleration
+            )
+            speed = max(0.0, speed - total_deceleration * time_step)
+
+        distance += ((previous_speed + speed) / 2) * time_step
+        elapsed += time_step
+        peak_speed = max(peak_speed, speed)
+        acceleration_g = (speed - previous_speed) / time_step / 9.81
+
+        if measured_start_time is None and distance >= measured_start:
+            measured_start_time = elapsed
+        if measured_end_time is None and distance >= measured_end:
+            measured_end_time = elapsed
+
+        while elapsed + 1e-9 >= next_telemetry_time:
+            if distance < measured_start:
+                phase = "accelerating"
+            elif distance < measured_end:
+                phase = "measured mile"
+            else:
+                phase = "decelerating"
+            telemetry.append(
+                TelemetrySample(
+                    time_seconds=round(next_telemetry_time, 1),
+                    distance_miles=round(distance / METERS_PER_MILE, 3),
+                    speed_mph=round(speed * 2.23694, 1),
+                    acceleration_g=round(acceleration_g, 3),
+                    phase=phase,
+                )
+            )
+            next_telemetry_time += 1.0
+
+        if speed <= 0.1 and distance < track_distance:
+            break
+
+    completed = distance >= track_distance
+    if telemetry[-1].time_seconds < round(elapsed, 1):
+        telemetry.append(
+            TelemetrySample(
+                time_seconds=round(elapsed, 1),
+                distance_miles=round(distance / METERS_PER_MILE, 3),
+                speed_mph=round(speed * 2.23694, 1),
+                acceleration_g=round(acceleration_g, 3),
+                phase="decelerating",
+            )
+        )
+    measured_time = (measured_end_time or elapsed) - (measured_start_time or elapsed)
+    measured_speed = measured_mile_length * METERS_PER_MILE / max(measured_time, time_step)
+
+    return SimulationResult(
+        track_miles=track_miles,
+        measured_mile_time_seconds=round(measured_time, 2),
+        measured_mile_speed_mph=round(measured_speed * 2.23694, 1),
+        peak_speed_mph=round(peak_speed * 2.23694, 1),
+        total_time_seconds=round(elapsed, 2),
+        completed=completed,
+        telemetry=telemetry,
+    )
