@@ -13,7 +13,13 @@ class TelemetrySample:
     time_seconds: float
     distance_miles: float
     speed_mph: float
+    engine_rpm: int
     acceleration_g: float
+    wheelspin: bool
+    gear: int
+    shifting: bool
+    brake_temperature_c: float
+    brake_fade: bool
     phase: str
 
 
@@ -24,6 +30,7 @@ class SimulationResult:
     measured_mile_speed_mph: float
     peak_speed_mph: float
     total_time_seconds: float
+    total_distance_miles: float
     completed: bool
     telemetry: list[TelemetrySample]
 
@@ -33,12 +40,23 @@ def calculate_drag_force(vehicle, speed_m_per_second):
     return 0.5 * vehicle.cd * AIR_DENSITY * speed_m_per_second**2 * vehicle.area
 
 
+def calculate_wheel_torque(vehicle):
+    """Return current-gear wheel torque before traction limits are applied."""
+    return (
+        vehicle.peak_torque_nm
+        * vehicle.gearbox.current_ratio
+        * vehicle.gearbox.final_drive_ratio
+        * vehicle.gearbox.efficiency
+    )
+
+
 def run_simulation(
     vehicle,
     track_miles=10.0,
     measured_mile_start=4.0,
     measured_mile_length=1.0,
     time_step=0.1,
+    track_friction_factor=1.0,
 ):
     """Simulate acceleration, a measured mile, and braking on a track."""
     if track_miles <= 0:
@@ -52,18 +70,25 @@ def run_simulation(
         or vehicle.power <= 0
         or vehicle.cd <= 0
         or vehicle.area <= 0
-        or vehicle.traction_coefficient <= 0
+        or vehicle.tire_grip_factor <= 0
+        or vehicle.peak_torque_nm <= 0
+        or vehicle.wheel_radius_m <= 0
+        or track_friction_factor <= 0
     ):
-        raise ValueError("vehicle dimensions, power, mass, and traction must be greater than zero")
+        raise ValueError("vehicle values and friction factors must be greater than zero")
 
     rolling_resistance = 0.015
     drivetrain_efficiency = 0.85
-    braking_acceleration = 0.05 * 9.81
     track_distance = track_miles * METERS_PER_MILE
     measured_start = measured_mile_start * METERS_PER_MILE
     measured_end = (measured_mile_start + measured_mile_length) * METERS_PER_MILE
     power_watts = vehicle.power * HORSEPOWER_IN_WATTS * drivetrain_efficiency
-    maximum_traction_force = vehicle.traction_coefficient * vehicle.mass * 9.81
+    effective_traction = vehicle.tire_grip_factor * track_friction_factor
+    maximum_traction_force = effective_traction * vehicle.mass * 9.81
+    if vehicle.brakes is None:
+        raise ValueError("vehicle must have a brake system")
+    vehicle.brakes.reset()
+    vehicle.gearbox.current_gear = 1
 
     distance = 0.0
     speed = 0.0
@@ -72,26 +97,52 @@ def run_simulation(
     measured_start_time = None
     measured_end_time = None
     next_telemetry_time = 1.0
-    telemetry = [TelemetrySample(0.0, 0.0, 0.0, 0.0, "accelerating")]
+    vehicle.gearbox.current_gear = 1
+    vehicle.gearbox.pending_gear = None
+    vehicle.gearbox.shift_elapsed = 0.0
+    telemetry = [
+        TelemetrySample(0.0, 0.0, 0.0, 0, 0.0, False, 1, False, 20.0, False, "accelerating")
+    ]
 
     while distance < track_distance and elapsed < 3600:
         previous_distance = distance
         previous_speed = speed
+        wheelspin = False
 
         if distance < measured_end:
+            engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
+            vehicle.gearbox.shift_if_needed(engine_rpm)
+            engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
             drag_force = calculate_drag_force(vehicle, speed)
             rolling_force = vehicle.mass * 9.81 * rolling_resistance
             power_limited_force = power_watts / max(speed, 1.0)
-            available_force = min(power_limited_force, maximum_traction_force)
+            torque_limited_force = (
+                calculate_wheel_torque(vehicle)
+                * vehicle.gearbox.clutch_torque_multiplier()
+                / vehicle.wheel_radius_m
+            )
+            requested_force = min(power_limited_force, torque_limited_force)
+            wheelspin = requested_force > maximum_traction_force
+            available_force = min(requested_force, maximum_traction_force)
             acceleration = (available_force - drag_force - rolling_force) / vehicle.mass
             speed = max(0.0, speed + acceleration * time_step)
+            vehicle.gearbox.advance_shift(time_step)
         else:
+            engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
+            vehicle.gearbox.shift_if_needed(engine_rpm, decelerating=True)
+            brake_force = vehicle.brakes.calculate_force(
+                vehicle.mass,
+                maximum_traction_force,
+            )
+            vehicle.brakes.update_temperature(brake_force, speed, time_step)
+            brake_acceleration = brake_force / vehicle.mass
             drag_acceleration = calculate_drag_force(vehicle, speed) / vehicle.mass
             rolling_acceleration = 9.81 * rolling_resistance
             total_deceleration = (
-                braking_acceleration + drag_acceleration + rolling_acceleration
+                brake_acceleration + drag_acceleration + rolling_acceleration
             )
             speed = max(0.0, speed - total_deceleration * time_step)
+            vehicle.gearbox.advance_shift(time_step)
 
         distance += ((previous_speed + speed) / 2) * time_step
         elapsed += time_step
@@ -115,7 +166,13 @@ def run_simulation(
                     time_seconds=round(next_telemetry_time, 1),
                     distance_miles=round(distance / METERS_PER_MILE, 3),
                     speed_mph=round(speed * 2.23694, 1),
+                    engine_rpm=round(engine_rpm),
                     acceleration_g=round(acceleration_g, 3),
+                    wheelspin=wheelspin,
+                    gear=vehicle.gearbox.current_gear,
+                    shifting=vehicle.gearbox.shifting,
+                    brake_temperature_c=round(vehicle.brakes.temperature_c, 1),
+                    brake_fade=vehicle.brakes.faded,
                     phase=phase,
                 )
             )
@@ -131,7 +188,13 @@ def run_simulation(
                 time_seconds=round(elapsed, 1),
                 distance_miles=round(distance / METERS_PER_MILE, 3),
                 speed_mph=round(speed * 2.23694, 1),
+                engine_rpm=round(engine_rpm),
                 acceleration_g=round(acceleration_g, 3),
+                wheelspin=wheelspin,
+                gear=vehicle.gearbox.current_gear,
+                shifting=vehicle.gearbox.shifting,
+                brake_temperature_c=round(vehicle.brakes.temperature_c, 1),
+                brake_fade=vehicle.brakes.faded,
                 phase="decelerating",
             )
         )
@@ -144,6 +207,7 @@ def run_simulation(
         measured_mile_speed_mph=round(measured_speed * 2.23694, 1),
         peak_speed_mph=round(peak_speed * 2.23694, 1),
         total_time_seconds=round(elapsed, 2),
+        total_distance_miles=round(distance / METERS_PER_MILE, 3),
         completed=completed,
         telemetry=telemetry,
     )
