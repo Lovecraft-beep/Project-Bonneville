@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 
-METERS_PER_MILE = 1609.344
+METRES_PER_MILE = 1609.344
 HORSEPOWER_IN_WATTS = 745.7
 AIR_DENSITY = 1.2
 
@@ -70,7 +70,7 @@ def run_simulation(
         or vehicle.power <= 0
         or vehicle.cd <= 0
         or vehicle.area <= 0
-        or vehicle.tire_grip_factor <= 0
+        or vehicle.tyre_grip_factor <= 0
         or vehicle.peak_torque_nm <= 0
         or vehicle.wheel_radius_m <= 0
         or track_friction_factor <= 0
@@ -79,11 +79,11 @@ def run_simulation(
 
     rolling_resistance = 0.015
     drivetrain_efficiency = 0.85
-    track_distance = track_miles * METERS_PER_MILE
-    measured_start = measured_mile_start * METERS_PER_MILE
-    measured_end = (measured_mile_start + measured_mile_length) * METERS_PER_MILE
+    track_distance = track_miles * METRES_PER_MILE
+    measured_start = measured_mile_start * METRES_PER_MILE
+    measured_end = (measured_mile_start + measured_mile_length) * METRES_PER_MILE
     power_watts = vehicle.power * HORSEPOWER_IN_WATTS * drivetrain_efficiency
-    effective_traction = vehicle.tire_grip_factor * track_friction_factor
+    effective_traction = vehicle.tyre_grip_factor * track_friction_factor
     maximum_traction_force = effective_traction * vehicle.mass * 9.81
     if vehicle.brakes is None:
         raise ValueError("vehicle must have a brake system")
@@ -164,7 +164,7 @@ def run_simulation(
             telemetry.append(
                 TelemetrySample(
                     time_seconds=round(next_telemetry_time, 1),
-                    distance_miles=round(distance / METERS_PER_MILE, 3),
+                    distance_miles=round(distance / METRES_PER_MILE, 3),
                     speed_mph=round(speed * 2.23694, 1),
                     engine_rpm=round(engine_rpm),
                     acceleration_g=round(acceleration_g, 3),
@@ -186,7 +186,7 @@ def run_simulation(
         telemetry.append(
             TelemetrySample(
                 time_seconds=round(elapsed, 1),
-                distance_miles=round(distance / METERS_PER_MILE, 3),
+                distance_miles=round(distance / METRES_PER_MILE, 3),
                 speed_mph=round(speed * 2.23694, 1),
                 engine_rpm=round(engine_rpm),
                 acceleration_g=round(acceleration_g, 3),
@@ -199,7 +199,7 @@ def run_simulation(
             )
         )
     measured_time = (measured_end_time or elapsed) - (measured_start_time or elapsed)
-    measured_speed = measured_mile_length * METERS_PER_MILE / max(measured_time, time_step)
+    measured_speed = measured_mile_length * METRES_PER_MILE / max(measured_time, time_step)
 
     return SimulationResult(
         track_miles=track_miles,
@@ -207,7 +207,7 @@ def run_simulation(
         measured_mile_speed_mph=round(measured_speed * 2.23694, 1),
         peak_speed_mph=round(peak_speed * 2.23694, 1),
         total_time_seconds=round(elapsed, 2),
-        total_distance_miles=round(distance / METERS_PER_MILE, 3),
+        total_distance_miles=round(distance / METRES_PER_MILE, 3),
         completed=completed,
         telemetry=telemetry,
     )

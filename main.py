@@ -16,7 +16,7 @@ def main():
         power=450,
         cd=0.30,
         area=2.5,
-        tire_grip_factor=0.8,
+        tyre_grip_factor=0.8,
         engine=NAPIER_LION_VIIA,
         wheel_radius_m=0.4,
         gearbox=Gearbox(

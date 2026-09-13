@@ -12,13 +12,13 @@ record attempts.
 
 ## Current Prototype
 
-The current program runs one command-line land-speed test. It models:
+The current application runs one command-line land-speed test. It models:
 
 - Vehicle mass, engine power, drag coefficient, and frontal area
 - Aerodynamic drag using `Fd = 0.5 * Cd * rho * v^2 * A`
 - Rolling resistance
 - Drivetrain efficiency
-- Tire grip and track friction limiting launch acceleration
+- Tyre grip and track friction limiting launch acceleration
 - Engine torque and drivetrain gearing
 - A configurable multi-speed gearbox with automatic upshifts
 - Timed clutch-based gear changes with clutch slip
@@ -45,7 +45,7 @@ From the project directory, run:
 python main.py
 ```
 
-The program displays the vehicle configuration, measured-mile result, peak
+The application displays the vehicle configuration, measured-mile result, peak
 speed, total run time, completion status, and the telemetry table.
 
 ## Project Files
@@ -55,7 +55,7 @@ speed, total run time, completion status, and the telemetry table.
 - `engines.py` contains the available engine definitions.
 - `simulation.py` contains the physics loop, drag calculation, validation, and
 	telemetry result types.
-- `gearbox.py` defines gear ratios, final drive, efficiency, and shift behavior.
+- `gearbox.py` defines gear ratios, final drive, efficiency, and shift behaviour.
 - `brakes.py` defines brake systems, heat buildup, efficiency, and fade.
 - `vision.md` describes the longer-term direction of the project.
 
@@ -70,7 +70,7 @@ The current `Vehicle` class accepts:
 | `power` | hp | Engine power |
 | `cd` | - | Aerodynamic drag coefficient |
 | `area` | m^2 | Frontal area |
-| `tire_grip_factor` | - | Tire capability to transmit engine force |
+| `tyre_grip_factor` | - | Tyre capability to transmit engine force |
 | `peak_torque_nm` | Nm | Engine torque used for low-speed wheel force |
 | `first_gear_ratio` | - | First-gear torque multiplication |
 | `final_drive_ratio` | - | Final-drive torque multiplication |
@@ -87,10 +87,10 @@ clutch is disengaged, then ramps back in during re-engagement. The
 `clutch_slip_factor` controls how much torque is lost while the clutch is
 reconnecting, and telemetry marks samples taken during a shift. During
 deceleration, the gearbox downshifts when engine RPM falls below
-`shift_down_rpm`. Engine braking is not yet modeled separately from the
+`shift_down_rpm`. Engine braking is not yet modelled separately from the
 braking system.
 
-Vehicles can also reference an engine definition. The current catalog begins
+Vehicles can also reference an engine definition. The current catalogue begins
 with a historically inspired 1920s Napier Lion VIIA: a 23.9-litre W12 rated
 here at 900 hp and 1,900 Nm, with a reliability factor of 0.85. These values
 are prototype data intended for gameplay
@@ -107,11 +107,11 @@ Aerodynamic drag is calculated with:
 Fd = 0.5 * Cd * rho * v^2 * A
 ```
 
-At low speed, available engine force is limited by the product of the tire grip
+At low speed, available engine force is limited by the product of the tyre grip
 factor and track friction factor:
 
 ```text
-effective traction = tire grip factor * track friction factor
+effective traction = tyre grip factor * track friction factor
 ```
 
 Engine torque is multiplied by the first-gear and final-drive ratios, then
@@ -124,24 +124,34 @@ During the deceleration phase, braking, aerodynamic drag, and rolling
 resistance reduce speed.
 
 The brake system has its own mechanical efficiency and maximum braking
-capability. Actual brake force is limited by available tire and track grip.
+capability. Actual brake force is limited by available tyre and track grip.
 Brake temperature increases with braking energy and decreases through cooling;
 above the fade threshold, usable brake force is reduced. Aerodynamic braking
 is calculated separately from the drag equation and becomes stronger as speed
 increases.
 
 This is intentionally an early model. It does not yet include engine torque
-curves, wind, gradients, tire temperature, stability, weather, driver skill,
+curves, wind, gradients, tyre temperature, stability, weather, driver skill,
 component failures, carbon brakes, or brake chutes.
+
+## Telemetry
+
+Telemetry will be very important as people develop new technologies and tune
+their existing setups. There will need to be screens, graphs, and simulations
+which may begin as inaccurate pencil-and-paper estimates, then become more
+accurate as mechanical calculators, computers, and CFD are introduced. Think
+wind tunnels and all the useful data they provide.
 
 ## Direction
 
 The next major systems are likely to include:
 
 - Historical vehicles, teams, locations, and record progression
+- Research and Development - Tech Trees?
+- Ability to download .csv files of the telemetry
 - Technology research and upgrade choices
 - Sponsorship, funding, stakeholder set goals
-- More detailed engine, tire, braking, and stability models
+- More detailed engine, tyre, braking, and stability models
 - Risk and failure during test runs
 - More useful run summaries and visual telemetry
 - Optional BeamNG or Unity integration
