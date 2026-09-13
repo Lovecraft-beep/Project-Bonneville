@@ -27,6 +27,8 @@ The current application runs one command-line land-speed test. It models:
 - Aerodynamic braking from speed-dependent drag
 - Wheelspin detection when requested force exceeds available traction
 - Historically inspired engine definitions, beginning with the Napier Lion
+- A selectable vehicle catalogue with Brick Mk1 and Blue Bird 1927
+- A selectable track catalogue with Bonneville Salt Flats and Brooklands
 - A configurable track length
 - A measured mile within the track
 - Acceleration, measured-mile travel, and deceleration phases
@@ -45,12 +47,15 @@ From the project directory, run:
 python main.py
 ```
 
-The application displays the vehicle configuration, measured-mile result, peak
-speed, total run time, completion status, and the telemetry table.
+The application presents a vehicle selection menu, then displays the chosen
+vehicle configuration, measured-mile result, peak speed, total run time,
+distance travelled, and telemetry table.
 
 ## Project Files
 
 - `main.py` creates the example vehicle and runs the simulation.
+- `cars.py` contains selectable vehicle definitions and the command-line menu.
+- `tracks.py` contains selectable track definitions and surface conditions.
 - `vehicle.py` defines the `Vehicle` class and its engineering properties.
 - `engines.py` contains the available engine definitions.
 - `simulation.py` contains the physics loop, drag calculation, validation, and
@@ -58,6 +63,24 @@ speed, total run time, completion status, and the telemetry table.
 - `gearbox.py` defines gear ratios, final drive, efficiency, and shift behaviour.
 - `brakes.py` defines brake systems, heat buildup, efficiency, and fade.
 - `vision.md` describes the longer-term direction of the project.
+
+## Available Vehicles
+
+The current catalogue contains:
+
+- `Brick Mk1`: a heavier Lion-powered prototype with a larger frontal area.
+- `Blue Bird 1927`: a lighter, more aerodynamic Lion-powered configuration.
+- `Jeantaud`: a 1,400 kg Welch Hemi-powered prototype with estimated
+	`Cd=0.95` and `1.7 m^2` frontal area.
+
+Run `python main.py` and choose `1`, `2`, or `3` from the vehicle menu. Each menu
+selection creates a fresh vehicle, gearbox, and brake system for the run.
+
+The track menu currently offers Bonneville Salt Flats and Brooklands. Track
+length, measured-mile position, altitude, temperature, air density, and surface
+friction are stored as track properties. The simulation currently uses track
+length, measured-mile position, and friction; altitude, temperature, and air
+density are recorded for the future engine and aerodynamic models.
 
 ## Vehicle Properties
 
@@ -90,10 +113,12 @@ deceleration, the gearbox downshifts when engine RPM falls below
 `shift_down_rpm`. Engine braking is not yet modelled separately from the
 braking system.
 
-Vehicles can also reference an engine definition. The current catalogue begins
-with a historically inspired 1920s Napier Lion VIIA: a 23.9-litre W12 rated
-here at 900 hp and 1,900 Nm, with a reliability factor of 0.85. These values
-are prototype data intended for gameplay
+Vehicles can also reference an engine definition. The current catalogue
+includes a historically inspired 1920s Napier Lion VIIA: a 23.9-litre W12
+rated here at 900 hp and 1,900 Nm, with a reliability factor of 0.85. It also
+includes the 36 hp, four-cylinder Welch Hemi, weighing 120 kg and producing
+approximately 203 Nm at a 2,500 RPM limit. The Welch Hemi reliability factor
+is provisionally set to 0.80. These values are prototype data intended for gameplay
 balancing and will need to be refined as the historical database grows.
 
 ## Physics Notes

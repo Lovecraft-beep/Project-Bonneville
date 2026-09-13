@@ -31,6 +31,11 @@ class SimulationResult:
     peak_speed_mph: float
     total_time_seconds: float
     total_distance_miles: float
+    average_acceleration_g: float
+    full_throttle_seconds: float
+    gear_change_count: int
+    wheelspin_event_count: int
+    maximum_brake_temperature_c: float
     completed: bool
     telemetry: list[TelemetrySample]
 
@@ -97,6 +102,10 @@ def run_simulation(
     measured_start_time = None
     measured_end_time = None
     next_telemetry_time = 1.0
+    previous_gear = 1
+    previous_wheelspin = False
+    gear_change_count = 0
+    wheelspin_event_count = 0
     vehicle.gearbox.current_gear = 1
     vehicle.gearbox.pending_gear = None
     vehicle.gearbox.shift_elapsed = 0.0
@@ -149,6 +158,13 @@ def run_simulation(
         peak_speed = max(peak_speed, speed)
         acceleration_g = (speed - previous_speed) / time_step / 9.81
 
+        if vehicle.gearbox.current_gear != previous_gear:
+            gear_change_count += 1
+            previous_gear = vehicle.gearbox.current_gear
+        if wheelspin and not previous_wheelspin:
+            wheelspin_event_count += 1
+        previous_wheelspin = wheelspin
+
         if measured_start_time is None and distance >= measured_start:
             measured_start_time = elapsed
         if measured_end_time is None and distance >= measured_end:
@@ -200,6 +216,8 @@ def run_simulation(
         )
     measured_time = (measured_end_time or elapsed) - (measured_start_time or elapsed)
     measured_speed = measured_mile_length * METRES_PER_MILE / max(measured_time, time_step)
+    average_acceleration_g = peak_speed / max(elapsed, time_step) / 9.81
+    full_throttle_seconds = measured_end_time or elapsed
 
     return SimulationResult(
         track_miles=track_miles,
@@ -208,6 +226,11 @@ def run_simulation(
         peak_speed_mph=round(peak_speed * 2.23694, 1),
         total_time_seconds=round(elapsed, 2),
         total_distance_miles=round(distance / METRES_PER_MILE, 3),
+        average_acceleration_g=round(average_acceleration_g, 3),
+        full_throttle_seconds=round(full_throttle_seconds, 2),
+        gear_change_count=gear_change_count,
+        wheelspin_event_count=wheelspin_event_count,
+        maximum_brake_temperature_c=round(vehicle.brakes.temperature_c, 1),
         completed=completed,
         telemetry=telemetry,
     )

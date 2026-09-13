@@ -42,6 +42,7 @@ class Vehicle:
         print(f"Name: {self.name}")
         if self.engine:
             print(f"Engine: {self.engine.name}")
+            print(f"Cylinders: {self.engine.cylinders}")
             print(f"Engine Reliability: {self.engine.reliability}")
             print(f"Engine Max RPM: {self.engine.max_rpm}")
         print(f"Mass: {self.mass} kg")

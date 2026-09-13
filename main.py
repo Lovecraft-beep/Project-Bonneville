@@ -1,49 +1,30 @@
 # Project Bonneville
 
-from vehicle import Vehicle
 from simulation import run_simulation
-from engines import NAPIER_LION_VIIA
-from gearbox import Gearbox
-from brakes import DRUM_BRAKES_1920S
+from cars import select_car
+from tracks import select_track
 
 # main loop
 def main():
     print('LSR Simulator')
 
-    vehicle = Vehicle(
-        name="Brick Mk1",
-        mass=3000,
-        power=450,
-        cd=0.30,
-        area=2.5,
-        tyre_grip_factor=0.8,
-        engine=NAPIER_LION_VIIA,
-        wheel_radius_m=0.4,
-        gearbox=Gearbox(
-            ratios=(2.5, 1.7, 1.0),
-            final_drive_ratio=1.15,
-            shift_up_rpm=2_600,
-            shift_down_rpm=1_200,
-        ),
-        brakes=DRUM_BRAKES_1920S,
-    )
+    vehicle = select_car()
+    track = select_track()
 
     vehicle.display()
+    print(f"Track: {track.name}")
+    print(f"Altitude: {track.altitude_m} m")
+    print(f"Temperature: {track.temperature_c} C")
+    print(f"Air Density: {track.air_density_kg_m3} kg/m^3")
 
     print("\nRunning simulation...")
 
     result = run_simulation(
         vehicle,
-        track_miles=10.0,
-        measured_mile_start=4.5,
-        track_friction_factor=0.3,
+        track_miles=track.length_miles,
+        measured_mile_start=track.measured_mile_start,
+        track_friction_factor=track.friction_factor,
     )
-
-    print(f"\nMeasured Mile Speed: {result.measured_mile_speed_mph} mph")
-    print(f"Measured Mile Time: {result.measured_mile_time_seconds} seconds")
-    print(f"Peak Speed: {result.peak_speed_mph} mph")
-    print(f"Total Run Time: {result.total_time_seconds} seconds")
-    print(f"Total Distance Run: {result.total_distance_miles} miles")
 
     print("\nTime   Distance   Speed   RPM    Accel G   Gear   Shift   Wheelspin   Brake C   Fade   Phase")
     print("----   --------   -----   -----  -------   ----   -----   ---------   -------   ----   ----------------")
@@ -61,6 +42,15 @@ def main():
             f"{str(sample.brake_fade):4}   "
             f"{sample.phase}"
         )
+
+    print("\n=== RUN SUMMARY ===")
+    print(f"Peak Speed: {result.peak_speed_mph} mph")
+    print(f"Average Acceleration: {result.average_acceleration_g} G")
+    print(f"Time at Full Throttle: {result.full_throttle_seconds} seconds")
+    print(f"Number of Gear Changes: {result.gear_change_count}")
+    print(f"Wheelspin Events: {result.wheelspin_event_count}")
+    print(f"Maximum Brake Temperature: {result.maximum_brake_temperature_c} C")
+    print(f"Measured Mile Speed: {result.measured_mile_speed_mph} mph")
 
 
 if __name__ == "__main__":

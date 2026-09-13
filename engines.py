@@ -6,6 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Engine:
     name: str
+    cylinders: int
     power_hp: float
     torque_nm: float
     max_rpm: int
@@ -18,6 +19,7 @@ class Engine:
 
 NAPIER_LION_VIIA = Engine(
     name="Napier Lion VIIA",
+    cylinders=12,
     power_hp=900.0,
     torque_nm=1_900.0,
     max_rpm=2_800,
@@ -29,6 +31,20 @@ NAPIER_LION_VIIA = Engine(
 )
 
 
+WELCH_HEMI = Engine(
+    name="Welch Hemi",
+    cylinders=4,
+    power_hp=36.0,
+    torque_nm=203.0,
+    max_rpm=2_500,
+    mass_kg=120.0,
+    reliability=0.80,
+    configuration="four-cylinder hemi",
+    era="1920s",
+)
+
+
 AVAILABLE_ENGINES = {
     NAPIER_LION_VIIA.name: NAPIER_LION_VIIA,
+    WELCH_HEMI.name: WELCH_HEMI,
 }
