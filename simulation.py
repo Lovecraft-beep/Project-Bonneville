@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 METRES_PER_MILE = 1609.344
 HORSEPOWER_IN_WATTS = 745.7
-AIR_DENSITY = 1.2
+STANDARD_AIR_DENSITY = 1.2
 
 
 @dataclass
@@ -40,9 +40,19 @@ class SimulationResult:
     telemetry: list[TelemetrySample]
 
 
-def calculate_drag_force(vehicle, speed_m_per_second):
+def calculate_drag_force(
+    vehicle,
+    speed_m_per_second,
+    air_density_kg_m3=STANDARD_AIR_DENSITY,
+):
     """Return aerodynamic drag in newtons at the given speed."""
-    return 0.5 * vehicle.cd * AIR_DENSITY * speed_m_per_second**2 * vehicle.area
+    return (
+        0.5
+        * vehicle.cd
+        * air_density_kg_m3
+        * speed_m_per_second**2
+        * vehicle.area
+    )
 
 
 def calculate_wheel_torque(vehicle):
@@ -62,6 +72,7 @@ def run_simulation(
     measured_mile_length=1.0,
     time_step=0.1,
     track_friction_factor=1.0,
+    air_density_kg_m3=STANDARD_AIR_DENSITY,
 ):
     """Simulate acceleration, a measured mile, and braking on a track."""
     if track_miles <= 0:
@@ -79,6 +90,7 @@ def run_simulation(
         or vehicle.peak_torque_nm <= 0
         or vehicle.wheel_radius_m <= 0
         or track_friction_factor <= 0
+        or air_density_kg_m3 <= 0
     ):
         raise ValueError("vehicle values and friction factors must be greater than zero")
 
@@ -122,7 +134,11 @@ def run_simulation(
             engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
             vehicle.gearbox.shift_if_needed(engine_rpm)
             engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
-            drag_force = calculate_drag_force(vehicle, speed)
+            drag_force = calculate_drag_force(
+                vehicle,
+                speed,
+                air_density_kg_m3,
+            )
             rolling_force = vehicle.mass * 9.81 * rolling_resistance
             power_limited_force = power_watts / max(speed, 1.0)
             torque_limited_force = (
@@ -145,7 +161,14 @@ def run_simulation(
             )
             vehicle.brakes.update_temperature(brake_force, speed, time_step)
             brake_acceleration = brake_force / vehicle.mass
-            drag_acceleration = calculate_drag_force(vehicle, speed) / vehicle.mass
+            drag_acceleration = (
+                calculate_drag_force(
+                    vehicle,
+                    speed,
+                    air_density_kg_m3,
+                )
+                / vehicle.mass
+            )
             rolling_acceleration = 9.81 * rolling_resistance
             total_deceleration = (
                 brake_acceleration + drag_acceleration + rolling_acceleration

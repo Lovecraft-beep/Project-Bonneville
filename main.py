@@ -10,12 +10,18 @@ def main():
 
     vehicle = select_car()
     track = select_track()
-
     vehicle.display()
     print(f"Track: {track.name}")
     print(f"Altitude: {track.altitude_m} m")
     print(f"Temperature: {track.temperature_c} C")
     print(f"Air Density: {track.air_density_kg_m3} kg/m^3")
+    print(f"Engine Cost: GBP {vehicle.engine.purchase_cost_gbp:,}")
+    print(f"Gearbox Cost: GBP {vehicle.gearbox.cost_gbp:,.0f}")
+    print(f"Track Event Cost: GBP {track.event_cost_gbp:,.0f}")
+    print(
+        f"Estimated Total Cost: "
+        f"GBP {vehicle.engine.purchase_cost_gbp + vehicle.gearbox.cost_gbp + track.event_cost_gbp:,.0f}"
+    )
 
     print("\nRunning simulation...")
 
@@ -24,6 +30,7 @@ def main():
         track_miles=track.length_miles,
         measured_mile_start=track.measured_mile_start,
         track_friction_factor=track.friction_factor,
+        air_density_kg_m3=track.air_density_kg_m3,
     )
 
     print("\nTime   Distance   Speed   RPM    Accel G   Gear   Shift   Wheelspin   Brake C   Fade   Phase")

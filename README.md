@@ -27,14 +27,32 @@ The current application runs one command-line land-speed test. It models:
 - Aerodynamic braking from speed-dependent drag
 - Wheelspin detection when requested force exceeds available traction
 - Historically inspired engine definitions, beginning with the Napier Lion
-- A selectable vehicle catalogue with Brick Mk1 and Blue Bird 1927
-- A selectable track catalogue with Bonneville Salt Flats and Brooklands
+- A selectable vehicle catalogue including Brick Mk1, Blue Bird 1927, and the
+	1931 Campbell-Napier-Railton Blue Bird
+- A selectable track catalogue with Bonneville Salt Flats, Brooklands, Pendine
+	Sands, Daytona Beach, Black Rock Desert, and Doncaster Test Track
 - A configurable track length
 - A measured mile within the track
 - Acceleration, measured-mile travel, and deceleration phases
 - Speed, distance, elapsed time, and acceleration in G telemetry
 - Engine RPM and current gear in telemetry
 
+## Management Costs
+
+Engines have a base cost and rarity factor. Purchase cost increases with engine
+power and rarity. Tracks have an entry cost and a transport cost based on their
+distance from the Midlands of England. The selected engine cost, track event
+cost, and estimated combined cost are displayed before each run.
+
+Compatible vehicle classes can select from a gearbox catalogue. The Blue Bird
+class currently offers the standard `Blue Bird 3-Speed` and the `Railton
+3-Speed LSR`. Each selection receives a fresh gearbox instance so shifting
+state is not shared between runs.
+
+Gearboxes also have acquisition costs. The standard Blue Bird gearbox is
+currently priced at GBP 4,000, while the specialised Railton 3-Speed LSR is
+priced at GBP 12,000. The selected gearbox cost is included in the estimated
+total setup cost.
 The default run uses a 10-mile track with the measured mile beginning at mile
 4. Telemetry is recorded at one-second intervals, with an additional final
 sample when the run ends between intervals.
@@ -72,11 +90,22 @@ The current catalogue contains:
 - `Blue Bird 1927`: a lighter, more aerodynamic Lion-powered configuration.
 - `Jeantaud`: a 1,400 kg Welch Hemi-powered prototype with estimated
 	`Cd=0.95` and `1.7 m^2` frontal area.
+- `Campbell-Napier-Railton Blue Bird`: a 1931, 3,600 kg car using the Napier
+	Lion XI, with `Cd=0.55`, `2.3 m^2` frontal area, and `0.50 m` wheel radius.
 
-Run `python main.py` and choose `1`, `2`, or `3` from the vehicle menu. Each menu
+Run `python main.py` and choose `1`, `2`, `3`, or `4` from the vehicle menu. Each menu
 selection creates a fresh vehicle, gearbox, and brake system for the run.
 
-The track menu currently offers Bonneville Salt Flats and Brooklands. Track
+When `Blue Bird 1927` is selected, a second menu offers the available Napier
+Lion variants. Each variant supplies its own power, torque, RPM limit, mass,
+reliability, configuration, displacement, and era.
+
+When the 1931 Campbell-Napier-Railton Blue Bird is selected, the player can
+also choose its Napier Lion variant and gearbox. Its defaults are the Napier
+Lion XI and Railton 3-Speed LSR.
+
+The track menu currently offers Bonneville Salt Flats, Brooklands, Pendine
+Sands, Daytona Beach, Black Rock Desert, and Doncaster Test Track. Track
 length, measured-mile position, altitude, temperature, air density, and surface
 friction are stored as track properties. The simulation currently uses track
 length, measured-mile position, and friction; altitude, temperature, and air
@@ -113,6 +142,11 @@ deceleration, the gearbox downshifts when engine RPM falls below
 `shift_down_rpm`. Engine braking is not yet modelled separately from the
 braking system.
 
+Gearboxes are separate components with their own name, ratios, final drive,
+shift time, clutch time, efficiency, mass, and reliability. The
+Campbell-Napier-Railton Blue Bird uses the `Railton 3-Speed LSR` gearbox with
+ratios `4.01`, `2.27`, and `1.24`.
+
 Vehicles can also reference an engine definition. The current catalogue
 includes a historically inspired 1920s Napier Lion VIIA: a 23.9-litre W12
 rated here at 900 hp and 1,900 Nm, with a reliability factor of 0.85. It also
@@ -126,11 +160,16 @@ balancing and will need to be refined as the historical database grows.
 The simulation uses SI units internally. Speeds are converted to mph for
 display, and distances are converted to miles for display.
 
-Aerodynamic drag is calculated with:
+Aerodynamic drag is calculated with the selected track's air density:
 
 ```text
 Fd = 0.5 * Cd * rho * v^2 * A
 ```
+
+Air density affects both aerodynamic drag during acceleration and aerodynamic
+braking during deceleration. Lower-density air reduces both forces. Standalone
+simulation calls default to standard air density unless a track-specific value
+is supplied.
 
 At low speed, available engine force is limited by the product of the tyre grip
 factor and track friction factor:
@@ -173,6 +212,7 @@ The next major systems are likely to include:
 
 - Historical vehicles, teams, locations, and record progression
 - Research and Development - Tech Trees?
+	Engine trees have started to be implemented
 - Ability to download .csv files of the telemetry
 - Technology research and upgrade choices
 - Sponsorship, funding, stakeholder set goals
@@ -180,5 +220,5 @@ The next major systems are likely to include:
 - Risk and failure during test runs
 - More useful run summaries and visual telemetry
 - Optional BeamNG or Unity integration
-- If we can get Unity/Gary's Mod/BeamNG working - the record attempt will be driven by the player.
-
+- Eventually I'd like to see simulations of the runs rendered in Unity and even allow the player to pilot the car
+- Real rules will apply, two runs in opposite directions within one hour

@@ -18,8 +18,10 @@ class Vehicle:
         wheel_radius_m=0.4,
         gearbox=None,
         brakes=None,
+        model_year=None,
     ):
         self.name = name  # Name of the vehicle
+        self.model_year = model_year
         self.mass = mass  # Mass of the vehicle in kg
         self.engine = engine
         self.power = engine.power_hp if engine else power  # Power in hp
@@ -34,12 +36,14 @@ class Vehicle:
             else 2500.0
         )
         self.wheel_radius_m = wheel_radius_m
-        self.gearbox = gearbox or Gearbox(ratios=(3.0,))
+        self.gearbox = gearbox or Gearbox(name="Standard Gearbox", gears=(3.0,))
         self.brakes = brakes
 
     def display(self):
         print("\n=== VEHICLE ===")
         print(f"Name: {self.name}")
+        if self.model_year:
+            print(f"Year: {self.model_year}")
         if self.engine:
             print(f"Engine: {self.engine.name}")
             print(f"Cylinders: {self.engine.cylinders}")
@@ -51,9 +55,12 @@ class Vehicle:
         print(f"Area: {self.area} m²")
         print(f"Tyre Grip Factor: {self.tyre_grip_factor}")
         print(f"Peak Torque: {self.peak_torque_nm} Nm")
+        print(f"Gearbox: {self.gearbox.name}")
         print(f"Gears: {self.gearbox.gear_count}")
         print(f"Final Drive Ratio: {self.gearbox.final_drive_ratio}")
         print(f"Wheel Radius: {self.wheel_radius_m} m")
+        print(f"Gearbox Mass: {self.gearbox.mass_kg} kg")
+        print(f"Gearbox Reliability: {self.gearbox.reliability}")
         if self.brakes:
             print(f"Brakes: {self.brakes.name}")
             print(f"Brake Efficiency: {self.brakes.efficiency}")
