@@ -30,12 +30,13 @@ The current application runs one command-line land-speed test. It models:
 - A selectable vehicle catalogue including Brick Mk1, Blue Bird 1927, and the
 	1931 Campbell-Napier-Railton Blue Bird
 - A selectable track catalogue with Bonneville Salt Flats, Brooklands, Pendine
-	Sands, Daytona Beach, Black Rock Desert, and Doncaster Test Track
+	Sands, Daytona Beach, Black Rock Desert, Doncaster Test Track, and Public Roads
 - A configurable track length
 - A measured mile within the track
 - Acceleration, measured-mile travel, and deceleration phases
 - Speed, distance, elapsed time, and acceleration in G telemetry
 - Engine RPM and current gear in telemetry
+- Persistent historical run records with vehicle, track, and summary data
 
 ## Management Costs
 
@@ -69,11 +70,19 @@ The application presents a vehicle selection menu, then displays the chosen
 vehicle configuration, measured-mile result, peak speed, total run time,
 distance travelled, and telemetry table.
 
+## Historical Records
+
+Each simulation is saved to `historical_records.json`, which persists between
+sessions. A record stores the car, engine, gearbox, brakes, track, peak speed,
+average acceleration and deceleration, full-throttle time, and measured-mile
+average speed. The most recent records are displayed after each run.
+
 ## Project Files
 
 - `main.py` creates the example vehicle and runs the simulation.
 - `cars.py` contains selectable vehicle definitions and the command-line menu.
 - `tracks.py` contains selectable track definitions and surface conditions.
+- `records.py` saves and displays the persistent historical records table.
 - `vehicle.py` defines the `Vehicle` class and its engineering properties.
 - `engines.py` contains the available engine definitions.
 - `simulation.py` contains the physics loop, drag calculation, validation, and
@@ -92,8 +101,19 @@ The current catalogue contains:
 	`Cd=0.95` and `1.7 m^2` frontal area.
 - `Campbell-Napier-Railton Blue Bird`: a 1931, 3,600 kg car using the Napier
 	Lion XI, with `Cd=0.55`, `2.3 m^2` frontal area, and `0.50 m` wheel radius.
+- `Irving-Napier Golden Arrow`: Major Segrave's 1929 streamlined record car,
+	using the Napier Lion VIIB and Golden Arrow 3-Speed LSR gearbox. Its recorded
+	dimensions are 8.43 m long, 1.14 m high, with a 4.07 m wheelbase and 3,661 kg
+	mass.
+- `Stanley Steamer Rocket`: a 1906 steam-powered record car using a two-cylinder
+	150 hp steam engine and direct-drive transmission. It is 4.74 m long and
+	0.93 m high, weighs 1,000 kg, and has a 2.49 m wheelbase; remaining prototype
+	figures will be refined as historical source data is added.
+- `Darracq 1905`: a 1,000 kg car with a 200 hp, 25.422-litre V8, two-speed
+	gearbox with a `2.0` final drive, weak mechanical drum brakes, `Cd=0.75`, and
+	`1.9 m^2` frontal area. Its prototype gearbox efficiency is set to 85%.
 
-Run `python main.py` and choose `1`, `2`, `3`, or `4` from the vehicle menu. Each menu
+Run `python main.py` and choose `1`, `2`, `3`, `4`, `5`, `6`, or `7` from the vehicle menu. Each menu
 selection creates a fresh vehicle, gearbox, and brake system for the run.
 
 When `Blue Bird 1927` is selected, a second menu offers the available Napier
@@ -119,14 +139,23 @@ The current `Vehicle` class accepts:
 | --- | --- | --- |
 | `name` | - | Vehicle name |
 | `mass` | kg | Vehicle mass |
-| `power` | hp | Engine power |
 | `cd` | - | Aerodynamic drag coefficient |
 | `area` | m^2 | Frontal area |
 | `tyre_grip_factor` | - | Tyre capability to transmit engine force |
-| `peak_torque_nm` | Nm | Engine torque used for low-speed wheel force |
-| `first_gear_ratio` | - | First-gear torque multiplication |
-| `final_drive_ratio` | - | Final-drive torque multiplication |
 | `wheel_radius_m` | m | Radius used to convert wheel torque to force |
+
+Each vehicle must reference an `Engine` and a `Gearbox`. Engine power and
+torque are derived from the selected engine; gear ratios, final drive,
+efficiency, mass, reliability, and shift timings are derived from the selected
+gearbox. Car definitions therefore contain only chassis properties and
+component choices.
+
+Engines use a generic torque-curve category until verified historical dyno data
+is available. `early_piston` torque rises to a mid-range peak then falls near
+redline, `supercharged_piston` holds stronger high-RPM torque, and `steam`
+delivers high low-RPM torque with a gradual fall at speed. Torque is calculated
+from the current engine RPM before gearbox multiplication, and falls to zero
+above the engine's maximum RPM.
 
 The vehicle can use a `Gearbox` with a tuple of gear ratios, a final-drive
 ratio, drivetrain efficiency, and an upshift RPM. Engine RPM is calculated from

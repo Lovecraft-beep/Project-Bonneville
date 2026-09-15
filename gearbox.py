@@ -119,6 +119,26 @@ BLUE_BIRD_GEARBOX = Gearbox(
 )
 
 
+BRICK_3_SPEED = Gearbox(
+    name="Brick 3-Speed",
+    gears=(2.5, 1.7, 1.0),
+    final_drive=1.15,
+    shift_up_rpm=2_600,
+    shift_down_rpm=1_200,
+    cost_gbp=4_500.0,
+)
+
+
+JEANTAUD_3_SPEED = Gearbox(
+    name="Jeantaud 3-Speed",
+    gears=(3.2, 1.8, 1.0),
+    final_drive=3.5,
+    shift_up_rpm=2_300,
+    shift_down_rpm=1_100,
+    cost_gbp=2_500.0,
+)
+
+
 RAILTON_3_SPEED_LSR = Gearbox(
     name="Railton 3-Speed LSR",
     gears=(4.01, 2.27, 1.24),
@@ -134,9 +154,63 @@ RAILTON_3_SPEED_LSR = Gearbox(
 )
 
 
+GOLDEN_ARROW_3_SPEED = Gearbox(
+    name="Golden Arrow 3-Speed LSR",
+    gears=(3.0, 1.8, 1.0),
+    final_drive=1.0,
+    shift_time_seconds=1.5,
+    clutch_time_seconds=0.75,
+    efficiency=0.90,
+    mass_kg=160.0,
+    reliability=0.80,
+    cost_gbp=15_000.0,
+    shift_up_rpm=3_300,
+    shift_down_rpm=1_500,
+)
+
+
+STANLEY_ROCKET_DIRECT_DRIVE = Gearbox(
+    name="Stanley Rocket Direct Drive",
+    gears=(1.0,),
+    final_drive=1.15,
+    shift_time_seconds=0.5,
+    clutch_time_seconds=0.25,
+    efficiency=0.80,
+    mass_kg=90.0,
+    reliability=0.90,
+    cost_gbp=3_000.0,
+    shift_up_rpm=1_400,
+    shift_down_rpm=700,
+)
+
+
+DARRACQ_2_SPEED = Gearbox(
+    name="Darracq 2-Speed",
+    gears=(2.8, 1.0),
+    final_drive=2.0,
+    shift_time_seconds=2.5,
+    clutch_time_seconds=1.25,
+    efficiency=0.85,
+    mass_kg=120.0,
+    reliability=0.70,
+    cost_gbp=5_000.0,
+    shift_up_rpm=1_800,
+    shift_down_rpm=900,
+)
+
+
 BLUE_BIRD_GEARBOXES = (BLUE_BIRD_GEARBOX, RAILTON_3_SPEED_LSR)
+PREBUILT_GEARBOXES = (
+    BRICK_3_SPEED,
+    BLUE_BIRD_GEARBOX,
+    JEANTAUD_3_SPEED,
+    RAILTON_3_SPEED_LSR,
+    GOLDEN_ARROW_3_SPEED,
+    STANLEY_ROCKET_DIRECT_DRIVE,
+    DARRACQ_2_SPEED,
+)
 
 
 AVAILABLE_GEARBOXES = {
-    gearbox.name: gearbox for gearbox in BLUE_BIRD_GEARBOXES
+    gearbox.name: gearbox for gearbox in PREBUILT_GEARBOXES
 }

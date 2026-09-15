@@ -32,6 +32,7 @@ class SimulationResult:
     total_time_seconds: float
     total_distance_miles: float
     average_acceleration_g: float
+    average_deceleration_g: float
     full_throttle_seconds: float
     gear_change_count: int
     wheelspin_event_count: int
@@ -55,10 +56,10 @@ def calculate_drag_force(
     )
 
 
-def calculate_wheel_torque(vehicle):
+def calculate_wheel_torque(vehicle, engine_rpm):
     """Return current-gear wheel torque before traction limits are applied."""
     return (
-        vehicle.peak_torque_nm
+        vehicle.engine.torque_at_rpm(engine_rpm)
         * vehicle.gearbox.current_ratio
         * vehicle.gearbox.final_drive_ratio
         * vehicle.gearbox.efficiency
@@ -118,6 +119,10 @@ def run_simulation(
     previous_wheelspin = False
     gear_change_count = 0
     wheelspin_event_count = 0
+    acceleration_total_g = 0.0
+    acceleration_step_count = 0
+    deceleration_total_g = 0.0
+    deceleration_step_count = 0
     vehicle.gearbox.current_gear = 1
     vehicle.gearbox.pending_gear = None
     vehicle.gearbox.shift_elapsed = 0.0
@@ -142,7 +147,7 @@ def run_simulation(
             rolling_force = vehicle.mass * 9.81 * rolling_resistance
             power_limited_force = power_watts / max(speed, 1.0)
             torque_limited_force = (
-                calculate_wheel_torque(vehicle)
+                calculate_wheel_torque(vehicle, engine_rpm)
                 * vehicle.gearbox.clutch_torque_multiplier()
                 / vehicle.wheel_radius_m
             )
@@ -180,6 +185,12 @@ def run_simulation(
         elapsed += time_step
         peak_speed = max(peak_speed, speed)
         acceleration_g = (speed - previous_speed) / time_step / 9.81
+        if acceleration_g > 0:
+            acceleration_total_g += acceleration_g
+            acceleration_step_count += 1
+        if acceleration_g < 0:
+            deceleration_total_g += -acceleration_g
+            deceleration_step_count += 1
 
         if vehicle.gearbox.current_gear != previous_gear:
             gear_change_count += 1
@@ -239,7 +250,8 @@ def run_simulation(
         )
     measured_time = (measured_end_time or elapsed) - (measured_start_time or elapsed)
     measured_speed = measured_mile_length * METRES_PER_MILE / max(measured_time, time_step)
-    average_acceleration_g = peak_speed / max(elapsed, time_step) / 9.81
+    average_acceleration_g = acceleration_total_g / max(acceleration_step_count, 1)
+    average_deceleration_g = deceleration_total_g / max(deceleration_step_count, 1)
     full_throttle_seconds = measured_end_time or elapsed
 
     return SimulationResult(
@@ -250,6 +262,7 @@ def run_simulation(
         total_time_seconds=round(elapsed, 2),
         total_distance_miles=round(distance / METRES_PER_MILE, 3),
         average_acceleration_g=round(average_acceleration_g, 3),
+        average_deceleration_g=round(average_deceleration_g, 3),
         full_throttle_seconds=round(full_throttle_seconds, 2),
         gear_change_count=gear_change_count,
         wheelspin_event_count=wheelspin_event_count,

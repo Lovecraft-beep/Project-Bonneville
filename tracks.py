@@ -108,6 +108,20 @@ DONCASTER_TEST_TRACK = Track(
 )
 
 
+PUBLIC_ROADS = Track(
+    name="Public Roads",
+    length_miles=3.0,
+    measured_mile_start=1.0,
+    altitude_m=100.0,
+    temperature_c=15.0,
+    air_density_kg_m3=1.225,
+    friction_factor=0.75,
+    distance_from_midlands_miles=50.0,
+    base_entry_cost_gbp=100.0,
+    transport_cost_per_mile_gbp=2.0,
+)
+
+
 AVAILABLE_TRACKS = {
     "1": BONNEVILLE_SALT_FLATS,
     "2": BROOKLANDS,
@@ -115,6 +129,7 @@ AVAILABLE_TRACKS = {
     "4": DAYTONA_BEACH,
     "5": BLACK_ROCK_DESERT,
     "6": DONCASTER_TEST_TRACK,
+    "7": PUBLIC_ROADS,
 }
 
 

@@ -1,7 +1,8 @@
-# Project Bonneville
+# Project6 Bonneville
 
 from simulation import run_simulation
 from cars import select_car
+from records import create_record, display_records, load_records, save_record
 from tracks import select_track
 
 # main loop
@@ -53,11 +54,16 @@ def main():
     print("\n=== RUN SUMMARY ===")
     print(f"Peak Speed: {result.peak_speed_mph} mph")
     print(f"Average Acceleration: {result.average_acceleration_g} G")
+    print(f"Average Deceleration: {result.average_deceleration_g} G")
     print(f"Time at Full Throttle: {result.full_throttle_seconds} seconds")
     print(f"Number of Gear Changes: {result.gear_change_count}")
     print(f"Wheelspin Events: {result.wheelspin_event_count}")
     print(f"Maximum Brake Temperature: {result.maximum_brake_temperature_c} C")
     print(f"Measured Mile Speed: {result.measured_mile_speed_mph} mph")
+
+    record = create_record(vehicle, track, result)
+    save_record(record)
+    display_records(load_records())
 
 
 if __name__ == "__main__":

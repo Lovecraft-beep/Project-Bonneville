@@ -17,11 +17,52 @@ class Engine:
     era: str = ""
     base_cost_gbp: float = 0.0
     rarity_factor: float = 1.0
+    torque_curve_type: str = "early_piston"
+
+    def __post_init__(self):
+        if self.torque_curve_type not in {
+            "early_piston",
+            "supercharged_piston",
+            "steam",
+        }:
+            raise ValueError("engine torque curve type must be recognised")
 
     @property
     def purchase_cost_gbp(self):
         power_factor = 1.0 + self.power_hp / 1_000
         return round(self.base_cost_gbp * power_factor * self.rarity_factor)
+
+    def torque_at_rpm(self, rpm):
+        """Return generic period-appropriate engine torque at the given RPM."""
+        if rpm > self.max_rpm:
+            return 0.0
+
+        rpm_fraction = max(0.0, rpm / self.max_rpm)
+        curve_points = {
+            "early_piston": (
+                (0.0, 0.60), (0.25, 0.60), (0.50, 0.90),
+                (0.70, 1.00), (0.90, 0.85), (1.0, 0.65),
+            ),
+            "supercharged_piston": (
+                (0.0, 0.55), (0.25, 0.65), (0.50, 0.90),
+                (0.75, 1.00), (0.90, 0.90), (1.0, 0.75),
+            ),
+            "steam": (
+                (0.0, 1.00), (0.50, 0.95), (0.80, 0.90),
+                (1.0, 0.80),
+            ),
+        }
+        points = curve_points[self.torque_curve_type]
+        for (lower_rpm, lower_torque), (upper_rpm, upper_torque) in zip(
+            points,
+            points[1:],
+        ):
+            if rpm_fraction <= upper_rpm:
+                interpolation = (rpm_fraction - lower_rpm) / (upper_rpm - lower_rpm)
+                return self.torque_nm * (
+                    lower_torque + interpolation * (upper_torque - lower_torque)
+                )
+        return self.torque_nm * points[-1][1]
 
 
 NAPIER_LION_VIIA = Engine(
@@ -37,6 +78,7 @@ NAPIER_LION_VIIA = Engine(
     era="1927",
     base_cost_gbp=20_000,
     rarity_factor=1.15,
+    torque_curve_type="supercharged_piston",
 )
 
 
@@ -69,9 +111,44 @@ WELCH_HEMI = Engine(
 )
 
 
+STANLEY_STEAM_ENGINE = Engine(
+    name="Stanley Rocket Steam Engine",
+    cylinders=2,
+    power_hp=150.0,
+    torque_nm=800.0,
+    max_rpm=2_500,
+    mass_kg=250.0,
+    reliability=0.88,
+    configuration="two-cylinder steam engine",
+    era="1906",
+    base_cost_gbp=4_000,
+    rarity_factor=1.3,
+    torque_curve_type="steam",
+)
+
+
+DARRACQ_V8_25_LITRE = Engine(
+    name="Darracq 25.422-litre V8",
+    cylinders=8,
+    power_hp=200.0,
+    torque_nm=850.0,
+    max_rpm=2_000,
+    mass_kg=300.0,
+    reliability=0.75,
+    configuration="25.422-litre V8",
+    displacement_litres=25.422,
+    era="1905",
+    base_cost_gbp=8_000,
+    rarity_factor=1.4,
+    torque_curve_type="early_piston",
+)
+
+
 AVAILABLE_ENGINES = {
     engine.name: engine for engine in NAPIER_LION_VARIANTS
 }
 AVAILABLE_ENGINES.update({
     WELCH_HEMI.name: WELCH_HEMI,
+    STANLEY_STEAM_ENGINE.name: STANLEY_STEAM_ENGINE,
+    DARRACQ_V8_25_LITRE.name: DARRACQ_V8_25_LITRE,
 })

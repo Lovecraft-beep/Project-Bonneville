@@ -3,13 +3,23 @@
 from copy import deepcopy
 
 from brakes import DRUM_BRAKES_1920S, BrakeSystem
-from engines import NAPIER_LION_VIIA, NAPIER_LION_VARIANTS, WELCH_HEMI
+from engines import (
+    NAPIER_LION_VIIA,
+    NAPIER_LION_VARIANTS,
+    DARRACQ_V8_25_LITRE,
+    STANLEY_STEAM_ENGINE,
+    WELCH_HEMI,
+)
 from engines import AVAILABLE_ENGINES
 from gearbox import (
     BLUE_BIRD_GEARBOX,
     BLUE_BIRD_GEARBOXES,
+    BRICK_3_SPEED,
+    DARRACQ_2_SPEED,
+    GOLDEN_ARROW_3_SPEED,
+    JEANTAUD_3_SPEED,
     RAILTON_3_SPEED_LSR,
-    Gearbox,
+    STANLEY_ROCKET_DIRECT_DRIVE,
 )
 from vehicle import Vehicle
 
@@ -18,19 +28,12 @@ def create_brick_mk1():
     return Vehicle(
         name="Brick Mk1",
         mass=3000,
-        power=450,
         cd=0.30,
         area=2.5,
         tyre_grip_factor=0.8,
         engine=NAPIER_LION_VIIA,
         wheel_radius_m=0.4,
-        gearbox=Gearbox(
-            name="Brick 3-Speed",
-            gears=(2.5, 1.7, 1.0),
-            final_drive=1.15,
-            shift_up_rpm=2_600,
-            shift_down_rpm=1_200,
-        ),
+        gearbox=deepcopy(BRICK_3_SPEED),
         brakes=BrakeSystem(
             name=DRUM_BRAKES_1920S.name,
             max_braking_g=DRUM_BRAKES_1920S.max_braking_g,
@@ -43,7 +46,6 @@ def create_blue_bird_1927(engine=NAPIER_LION_VIIA, gearbox=None):
     return Vehicle(
         name="Blue Bird 1927",
         mass=2500,
-        power=450,
         cd=0.40,
         area=2.2,
         tyre_grip_factor=0.85,
@@ -63,19 +65,12 @@ def create_jeantaud():
     return Vehicle(
         name="Jeantaud",
         mass=1400,
-        power=36,
         cd=0.95,
         area=1.7,
         tyre_grip_factor=0.75,
         engine=WELCH_HEMI,
         wheel_radius_m=0.35,
-        gearbox=Gearbox(
-            name="Jeantaud 3-Speed",
-            gears=(3.2, 1.8, 1.0),
-            final_drive=3.5,
-            shift_up_rpm=2_300,
-            shift_down_rpm=1_100,
-        ),
+        gearbox=deepcopy(JEANTAUD_3_SPEED),
         brakes=BrakeSystem(
             name=DRUM_BRAKES_1920S.name,
             max_braking_g=DRUM_BRAKES_1920S.max_braking_g,
@@ -95,12 +90,11 @@ def create_campbell_napier_railton_blue_bird(
         name="Campbell-Napier-Railton Blue Bird",
         model_year=1931,
         mass=3600,
-        power=engine.power_hp,
         cd=0.55,
         area=2.3,
         tyre_grip_factor=0.9,
         engine=engine,
-        wheel_radius_m=0.50,
+        wheel_radius_m=0.55,
         gearbox=gearbox,
         brakes=BrakeSystem(
             name=DRUM_BRAKES_1920S.name,
@@ -110,11 +104,87 @@ def create_campbell_napier_railton_blue_bird(
     )
 
 
+def create_irving_napier_golden_arrow():
+    """Create Major Segrave's 1929 Irving-Napier Golden Arrow."""
+    return Vehicle(
+        name="Irving-Napier Golden Arrow",
+        model_year=1929,
+        mass=3661,
+        length_m=8.43,
+        height_m=1.14,
+        wheelbase_m=4.07,
+        cd=0.22,
+        area=1.9,
+        tyre_grip_factor=0.9,
+        engine=AVAILABLE_ENGINES["Napier Lion VIIB"],
+        wheel_radius_m=0.52,
+        gearbox=deepcopy(GOLDEN_ARROW_3_SPEED),
+        brakes=BrakeSystem(
+            name=DRUM_BRAKES_1920S.name,
+            max_braking_g=DRUM_BRAKES_1920S.max_braking_g,
+            efficiency=DRUM_BRAKES_1920S.efficiency,
+        ),
+    )
+
+
+def create_stanley_steamer_rocket():
+    """Create the 1906 Stanley Steamer Rocket record car."""
+    return Vehicle(
+        name="Stanley Steamer Rocket",
+        model_year=1906,
+        mass=1_000,
+        length_m=4.74,
+        height_m=0.93,
+        wheelbase_m=2.49,
+        cd=0.45,
+        area=1.45,
+        tyre_grip_factor=0.7,
+        engine=STANLEY_STEAM_ENGINE,
+        wheel_radius_m=0.55,
+        gearbox=deepcopy(STANLEY_ROCKET_DIRECT_DRIVE),
+        brakes=BrakeSystem(
+            name=DRUM_BRAKES_1920S.name,
+            max_braking_g=0.35,
+            efficiency=0.45,
+        ),
+    )
+
+
+def create_darracq_1905():
+    """Create the 1905 Darracq land-speed record car."""
+    return Vehicle(
+        name="Darracq 1905",
+        model_year=1905,
+        mass=1_000,
+        length_m=4.5,
+        height_m=1.24,
+        wheelbase_m=3.25,
+        cd=0.75,
+        area=1.9,
+        tyre_grip_factor=0.65,
+        engine=DARRACQ_V8_25_LITRE,
+        wheel_radius_m=0.42,
+        gearbox=deepcopy(DARRACQ_2_SPEED),
+        brakes=BrakeSystem(
+            name="1905 mechanical drum brakes",
+            max_braking_g=0.20,
+            efficiency=0.30,
+            fade_start_temperature_c=120.0,
+            fade_end_temperature_c=220.0,
+            heat_capacity_j_per_c=70_000.0,
+            cooling_rate_w_per_c=80.0,
+        ),
+    )
+
+
 AVAILABLE_CARS = {
     "1": create_brick_mk1,
     "2": create_blue_bird_1927,
     "3": create_jeantaud,
     "4": create_campbell_napier_railton_blue_bird,
+    "5": create_irving_napier_golden_arrow,
+    "6": create_stanley_steamer_rocket,
+    "7": create_darracq_1905,
 }
 
 
