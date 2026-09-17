@@ -68,10 +68,11 @@ class Gearbox:
     def shifting(self):
         return self.pending_gear is not None
 
-    def shift_if_needed(self, engine_rpm, decelerating=False):
+    def shift_if_needed(self, engine_rpm, decelerating=False, rpm_limit=None):
+        upshift_rpm = self.shift_up_rpm if rpm_limit is None else min(self.shift_up_rpm, rpm_limit)
         if (
             not self.shifting
-            and engine_rpm >= self.shift_up_rpm
+            and engine_rpm >= upshift_rpm
             and self.current_gear < self.gear_count
         ):
             self.pending_gear = self.current_gear + 1

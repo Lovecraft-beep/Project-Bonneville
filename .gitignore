@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+campaign_state.json
+historical_records.json

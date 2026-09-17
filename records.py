@@ -12,6 +12,7 @@ RECORDS_FILE = Path(__file__).with_name("historical_records.json")
 @dataclass
 class HistoricalRecord:
     recorded_at: str
+    campaign_id: str
     car_name: str
     car_year: int | None
     engine_name: str
@@ -25,9 +26,10 @@ class HistoricalRecord:
     measured_mile_speed_mph: float
 
 
-def create_record(vehicle, track, result):
+def create_record(vehicle, track, result, campaign):
     return HistoricalRecord(
         recorded_at=datetime.now().isoformat(timespec="seconds"),
+        campaign_id=campaign.campaign_id,
         car_name=vehicle.name,
         car_year=vehicle.model_year,
         engine_name=vehicle.engine.name,
@@ -57,17 +59,17 @@ def save_record(record):
     RECORDS_FILE.write_text(json.dumps(records, indent=2), encoding="utf-8")
 
 
-def display_records(records, limit=10):
-    print("\n=== HISTORICAL RECORDS ===")
-    if not records:
-        print("No recorded runs yet.")
+def display_records(records, campaign_id, limit=10):
+    print("\n=== CAMPAIGN RECORDS ===")
+    campaign_records = [
+        record for record in records if record.get("campaign_id") == campaign_id
+    ]
+    if not campaign_records:
+        print("No recorded runs yet this campaign.")
         return
     ranked_records = sorted(
-        records,
-        key=lambda record: (
-            record["measured_mile_speed_mph"],
-            record["recorded_at"],
-        ),
+        campaign_records,
+        key=lambda record: record["measured_mile_speed_mph"],
         reverse=True,
     )
     for number, record in enumerate(ranked_records[:limit], start=1):

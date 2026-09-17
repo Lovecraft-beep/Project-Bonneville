@@ -45,6 +45,36 @@ power and rarity. Tracks have an entry cost and a transport cost based on their
 distance from the Midlands of England. The selected engine cost, track event
 cost, and estimated combined cost are displayed before each run.
 
+The prototype also has a persistent campaign budget. A new campaign starts
+with GBP 100,000. Each completed run pays for the selected engine, gearbox,
+and track event. Runs that exceed the available budget are refused before the
+simulation starts. The campaign stores remaining funds, completed-run count,
+and the best measured-mile speed in `campaign_state.json`.
+
+Campaign management is represented by a `Team` with a name, cash balance,
+reputation, engineers, mechanics, and workshop level. These values are ready
+to support future hiring, sponsorship, workshop upgrades, and engineering
+constraints without coupling them to the physics simulation.
+
+The first research tree is `Engine Technology`, beginning with the `Basic
+Engines` era. Its initial nodes are `Multi Cylinder`, `Aluminium Pistons`,
+`Supercharging`, `Fuel Injection`, and `Aircraft Engine Conversion`. Research
+state is persisted with the campaign; `Basic Engines` is the first available
+research project and the five child technologies require it as a prerequisite.
+
+The campaign now has an annual turn structure. Each launch currently acts as
+one turn: the team reviews its state, performs a test run, pays the run cost,
+and advances to the next year. Research, hiring, workshop upgrades, and other
+management actions can become alternative turn actions as they are added.
+
+Test runs now include named failure risks: `Misfire`, `Oil leak`, `Gear
+failure`, `Tyre burst`, `Brake fade`, and `Steering vibration`. Failure
+probability combines component reliability, a speed factor based on peak speed,
+and a team skill modifier from the number of engineers and mechanics. Every
+failure causes an aborted run. A team needs at least one engineer and two
+mechanics to repair a failure trackside for a future attempt. Aborted failures
+are charged and counted, but do not create a successful historical record.
+
 Compatible vehicle classes can select from a gearbox catalogue. The Blue Bird
 class currently offers the standard `Blue Bird 3-Speed` and the `Railton
 3-Speed LSR`. Each selection receives a fresh gearbox instance so shifting
@@ -80,6 +110,9 @@ average speed. The most recent records are displayed after each run.
 ## Project Files
 
 - `main.py` creates the example vehicle and runs the simulation.
+- `management.py` stores campaign funds and completed-run progression.
+- `research.py` defines the engine technology tree and research prerequisites.
+- `reliability.py` resolves engine failure risk and trackside repairs.
 - `cars.py` contains selectable vehicle definitions and the command-line menu.
 - `tracks.py` contains selectable track definitions and surface conditions.
 - `records.py` saves and displays the persistent historical records table.
@@ -251,3 +284,11 @@ The next major systems are likely to include:
 - Optional BeamNG or Unity integration
 - Eventually I'd like to see simulations of the runs rendered in Unity and even allow the player to pilot the car
 - Real rules will apply, two runs in opposite directions within one hour
+- Rather than choosing complete vehicles, eventually allow:
+	Chassis
+	Engine
+	Gearbox
+	Tyres
+	Bodywork
+- to be swapped independently.
+- The current architecture already supports this direction quite well

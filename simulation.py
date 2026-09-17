@@ -137,7 +137,8 @@ def run_simulation(
 
         if distance < measured_end:
             engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
-            vehicle.gearbox.shift_if_needed(engine_rpm)
+            shift_limit = int(vehicle.engine.max_rpm * 0.90)
+            vehicle.gearbox.shift_if_needed(engine_rpm, rpm_limit=shift_limit)
             engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
             drag_force = calculate_drag_force(
                 vehicle,
@@ -159,7 +160,12 @@ def run_simulation(
             vehicle.gearbox.advance_shift(time_step)
         else:
             engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
-            vehicle.gearbox.shift_if_needed(engine_rpm, decelerating=True)
+            shift_limit = int(vehicle.engine.max_rpm * 0.90)
+            vehicle.gearbox.shift_if_needed(
+                engine_rpm,
+                decelerating=True,
+                rpm_limit=shift_limit,
+            )
             brake_force = vehicle.brakes.calculate_force(
                 vehicle.mass,
                 maximum_traction_force,
