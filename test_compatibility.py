@@ -2,12 +2,7 @@ import unittest
 from copy import deepcopy
 
 from cars import AVAILABLE_CARS
-from engines import (
-    DARRACQ_V8_25_LITRE,
-    NAPIER_LION_VARIANTS,
-    STANLEY_STEAM_ENGINE,
-    WELCH_HEMI,
-)
+from engines import ALL_ENGINES
 from gearbox import PREBUILT_GEARBOXES
 from simulation import run_simulation
 from tracks import AVAILABLE_TRACKS
@@ -15,12 +10,7 @@ from tracks import AVAILABLE_TRACKS
 
 class CombinationCompatibilityTests(unittest.TestCase):
     def test_all_car_engine_gearbox_track_combinations_run(self):
-        engines = [
-            *NAPIER_LION_VARIANTS,
-            WELCH_HEMI,
-            STANLEY_STEAM_ENGINE,
-            DARRACQ_V8_25_LITRE,
-        ]
+        engines = list(ALL_ENGINES)
         failures = []
         stuck_cases = []
 
@@ -48,7 +38,15 @@ class CombinationCompatibilityTests(unittest.TestCase):
                             continue
 
                         gears = {sample.gear for sample in result.telemetry}
-                        if gearbox.gear_count > 1 and result.peak_speed_mph > 20 and gears == {1}:
+                        # Turbojet/rocket engines are intended for direct-drive
+                        # cars, not period multi-speed gearboxes, so pairing
+                        # them here can legitimately stay in first gear.
+                        if (
+                            engine.torque_curve_type not in ("turbojet", "rocket")
+                            and gearbox.gear_count > 1
+                            and result.peak_speed_mph > 20
+                            and gears == {1}
+                        ):
                             stuck_cases.append(
                                 f"{car_key}/{engine.name}/{gearbox.name}/{track.name}"
                             )

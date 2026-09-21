@@ -2,7 +2,7 @@ import unittest
 
 from cars import create_blue_bird_1927
 from cars import create_darracq_1905
-from engines import NAPIER_LION_VARIANTS
+from engines import NAPIER_LION, ROLLS_ROYCE_R
 from gearbox import GOLDEN_ARROW_3_SPEED, Gearbox
 from tracks import BONNEVILLE_SALT_FLATS, DAYTONA_BEACH
 from simulation import run_simulation
@@ -26,7 +26,7 @@ class GearboxShiftTests(unittest.TestCase):
         self.assertEqual(gearbox.current_gear, 2)
 
     def test_run_shifts_before_engine_redline_when_gearbox_threshold_is_higher(self):
-        engine = NAPIER_LION_VARIANTS[3]
+        engine = NAPIER_LION
         vehicle = create_blue_bird_1927(engine=engine)
 
         result = run_simulation(
@@ -41,7 +41,7 @@ class GearboxShiftTests(unittest.TestCase):
         self.assertIn(2, {sample.gear for sample in result.telemetry})
 
     def test_high_output_engine_shifts_before_it_stalls_below_redline(self):
-        engine = NAPIER_LION_VARIANTS[8]
+        engine = ROLLS_ROYCE_R
         vehicle = create_darracq_1905()
         vehicle.engine = engine
         vehicle.power = engine.power_hp

@@ -5,7 +5,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from research import ENGINE_TECHNOLOGY_BY_ID
+from research import CHASSIS_TECHNOLOGY_BY_ID, ENGINE_TECHNOLOGY_BY_ID
 from sponsors import SPONSOR_BY_ID
 
 
@@ -35,6 +35,7 @@ class ResearchState:
     """Technologies researched by the team."""
 
     engine_technology: list[str] = field(default_factory=list)
+    chassis_technology: list[str] = field(default_factory=list)
 
     @property
     def engine_technology_level(self):
@@ -49,6 +50,19 @@ class ResearchState:
             raise ValueError(f"unknown engine technology: {technology_id}")
         if technology_id not in self.engine_technology:
             self.engine_technology.append(technology_id)
+
+    @property
+    def chassis_technology_level(self):
+        return len(self.chassis_technology)
+
+    def has_chassis_technology(self, technology_id):
+        return technology_id in self.chassis_technology
+
+    def add_chassis_technology(self, technology_id):
+        if technology_id not in CHASSIS_TECHNOLOGY_BY_ID:
+            raise ValueError(f"unknown chassis technology: {technology_id}")
+        if technology_id not in self.chassis_technology:
+            self.chassis_technology.append(technology_id)
 
 
 @dataclass
@@ -82,10 +96,29 @@ class SponsorshipState:
 
 
 @dataclass
+class GarageVehicle:
+    """A custom vehicle designed and built by the team."""
+
+    vehicle_name: str
+    chassis_id: str
+    engine_name: str
+    gearbox_name: str
+    brakes_name: str
+
+
+@dataclass
+class Garage:
+    """Custom vehicles built by the team and available for future runs."""
+
+    vehicles: list[GarageVehicle] = field(default_factory=list)
+
+
+@dataclass
 class CampaignState:
     team: Team = field(default_factory=Team)
     research: ResearchState = field(default_factory=ResearchState)
     sponsorship: SponsorshipState = field(default_factory=SponsorshipState)
+    garage: Garage = field(default_factory=Garage)
     campaign_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     current_year: int = STARTING_YEAR
     turn_number: int = 1
@@ -124,6 +157,12 @@ def load_campaign(path=CAMPAIGN_FILE):
         data["team"] = Team(**data["team"])
         data["research"] = ResearchState(**data.get("research", {}))
         data["sponsorship"] = SponsorshipState(**data.get("sponsorship", {}))
+        garage_data = data.get("garage", {})
+        data["garage"] = Garage(
+            vehicles=[
+                GarageVehicle(**vehicle) for vehicle in garage_data.get("vehicles", [])
+            ]
+        )
         return CampaignState(**data)
 
     # Migrate campaign files written before Team became the owner of cash.
@@ -234,8 +273,13 @@ def research_engine_technology(campaign, technology_id):
         raise ValueError(f"unknown engine technology: {technology_id}")
     if campaign.research.has_engine_technology(technology_id):
         raise ValueError(f"{technology.name} has already been researched")
-    if not set(technology.prerequisites).issubset(campaign.research.engine_technology):
-        raise ValueError(f"prerequisites not met for {technology.name}")
+    researched = set(campaign.research.engine_technology) | set(
+        campaign.research.chassis_technology
+    )
+    if not set(technology.prerequisites).issubset(researched):
+        raise ValueError(
+            f"chassis or engine prerequisites not met for {technology.name}"
+        )
     if campaign.team.cash < technology.cost_gbp:
         raise ValueError("insufficient funds for this research project")
     if campaign.team.engineers < technology.engineers_required:
@@ -243,3 +287,30 @@ def research_engine_technology(campaign, technology_id):
 
     campaign.team.cash = round(campaign.team.cash - technology.cost_gbp, 2)
     campaign.research.add_engine_technology(technology_id)
+
+
+def research_chassis_technology(campaign, technology_id):
+    """Spend cash and engineer time to unlock a chassis technology."""
+    technology = CHASSIS_TECHNOLOGY_BY_ID.get(technology_id)
+    if technology is None:
+        raise ValueError(f"unknown chassis technology: {technology_id}")
+    if campaign.research.has_chassis_technology(technology_id):
+        raise ValueError(f"{technology.name} has already been researched")
+    if not set(technology.prerequisites).issubset(campaign.research.chassis_technology):
+        raise ValueError(f"prerequisites not met for {technology.name}")
+    if campaign.team.cash < technology.cost_gbp:
+        raise ValueError("insufficient funds for this research project")
+    if campaign.team.engineers < technology.engineers_required:
+        raise ValueError("not enough engineers available for this research project")
+
+    campaign.team.cash = round(campaign.team.cash - technology.cost_gbp, 2)
+    campaign.research.add_chassis_technology(technology_id)
+
+
+def build_vehicle(campaign, garage_entry, cost_gbp):
+    """Pay the construction cost and save a new vehicle to the garage."""
+    if campaign.team.cash < cost_gbp:
+        raise ValueError("insufficient funds to build this vehicle")
+
+    campaign.team.cash = round(campaign.team.cash - cost_gbp, 2)
+    campaign.garage.vehicles.append(garage_entry)

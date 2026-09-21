@@ -1,6 +1,6 @@
 """Brake system definitions for Project Bonneville."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 
 @dataclass
@@ -8,6 +8,7 @@ class BrakeSystem:
     name: str
     max_braking_g: float
     efficiency: float
+    cost_gbp: float = 0.0
     fade_start_temperature_c: float = 250.0
     fade_end_temperature_c: float = 500.0
     heat_capacity_j_per_c: float = 120_000.0
@@ -62,4 +63,36 @@ DRUM_BRAKES_1920S = BrakeSystem(
     name="1920s mechanical drum brakes",
     max_braking_g=0.45,
     efficiency=0.55,
+    cost_gbp=1_500.0,
 )
+
+
+SERVO_ASSISTED_DRUM_BRAKES = BrakeSystem(
+    name="Servo-assisted drum brakes",
+    max_braking_g=0.55,
+    efficiency=0.70,
+    cost_gbp=4_000.0,
+    fade_start_temperature_c=300.0,
+    fade_end_temperature_c=550.0,
+)
+
+
+BRAKE_CATALOG = (DRUM_BRAKES_1920S, SERVO_ASSISTED_DRUM_BRAKES)
+BRAKE_BY_NAME = {brakes.name: brakes for brakes in BRAKE_CATALOG}
+
+
+def select_brakes():
+    print("\n=== SELECT BRAKES ===")
+    for number, brakes in enumerate(BRAKE_CATALOG, start=1):
+        print(
+            f"{number}. {brakes.name} (GBP {brakes.cost_gbp:,.0f}, "
+            f"{brakes.efficiency:.0%} efficiency, {brakes.max_braking_g}g max)"
+        )
+
+    choice = input("Choose a brake system: ").strip()
+    try:
+        template = BRAKE_CATALOG[int(choice) - 1]
+    except (ValueError, IndexError):
+        print("Invalid choice. Using 1920s mechanical drum brakes.")
+        template = DRUM_BRAKES_1920S
+    return replace(template)

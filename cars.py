@@ -4,8 +4,7 @@ from copy import deepcopy
 
 from brakes import DRUM_BRAKES_1920S, BrakeSystem
 from engines import (
-    NAPIER_LION_VIIA,
-    NAPIER_LION_VARIANTS,
+    NAPIER_LION,
     DARRACQ_V8_25_LITRE,
     STANLEY_STEAM_ENGINE,
     WELCH_HEMI,
@@ -22,6 +21,7 @@ from gearbox import (
     STANLEY_ROCKET_DIRECT_DRIVE,
 )
 from vehicle import Vehicle
+from vehicle_designer import build_vehicle_from_garage_entry
 
 
 def create_brick_mk1():
@@ -31,7 +31,7 @@ def create_brick_mk1():
         cd=0.30,
         area=2.5,
         tyre_grip_factor=0.8,
-        engine=NAPIER_LION_VIIA,
+        engine=NAPIER_LION,
         wheel_radius_m=0.4,
         gearbox=deepcopy(BRICK_3_SPEED),
         brakes=BrakeSystem(
@@ -42,7 +42,7 @@ def create_brick_mk1():
     )
 
 
-def create_blue_bird_1927(engine=NAPIER_LION_VIIA, gearbox=None):
+def create_blue_bird_1927(engine=NAPIER_LION, gearbox=None):
     return Vehicle(
         name="Blue Bird 1927",
         mass=2500,
@@ -84,7 +84,7 @@ def create_campbell_napier_railton_blue_bird(
     gearbox=None,
 ):
     """Create the 1931 Campbell-Napier-Railton Blue Bird."""
-    engine = engine or AVAILABLE_ENGINES["Napier Lion XI"]
+    engine = engine or NAPIER_LION
     gearbox = deepcopy(gearbox or RAILTON_3_SPEED_LSR)
     return Vehicle(
         name="Campbell-Napier-Railton Blue Bird",
@@ -116,7 +116,7 @@ def create_irving_napier_golden_arrow():
         cd=0.22,
         area=1.9,
         tyre_grip_factor=0.9,
-        engine=AVAILABLE_ENGINES["Napier Lion VIIB"],
+        engine=AVAILABLE_ENGINES["Rolls-Royce R"],
         wheel_radius_m=0.52,
         gearbox=deepcopy(GOLDEN_ARROW_3_SPEED),
         brakes=BrakeSystem(
@@ -188,51 +188,29 @@ AVAILABLE_CARS = {
 }
 
 
-def select_car():
+def select_car(campaign=None):
     print("\n=== SELECT VEHICLE ===")
     for choice, create_vehicle in AVAILABLE_CARS.items():
         print(f"{choice}. {create_vehicle().name}")
 
+    garage_vehicles = campaign.garage.vehicles if campaign is not None else []
+    garage_choices = {}
+    for offset, entry in enumerate(garage_vehicles):
+        choice_key = str(len(AVAILABLE_CARS) + 1 + offset)
+        garage_choices[choice_key] = entry
+        print(f"{choice_key}. {entry.vehicle_name} (garage)")
+
     choice = input("Choose a vehicle: ").strip()
+    if choice in garage_choices:
+        return build_vehicle_from_garage_entry(garage_choices[choice])
     if choice not in AVAILABLE_CARS:
         print("Invalid choice. Using Brick Mk1.")
         choice = "1"
     if choice == "2":
-        return select_blue_bird_engine()
+        return create_blue_bird_1927(gearbox=select_blue_bird_gearbox())
     if choice == "4":
-        return select_campbell_engine()
+        return create_campbell_napier_railton_blue_bird(gearbox=select_campbell_gearbox())
     return AVAILABLE_CARS[choice]()
-
-
-def select_blue_bird_engine():
-    print("\n=== SELECT BLUE BIRD ENGINE ===")
-    for number, engine in enumerate(NAPIER_LION_VARIANTS, start=1):
-        print(f"{number}. {engine.name} ({engine.power_hp} hp, {engine.era})")
-
-    choice = input("Choose a Napier Lion variant: ").strip()
-    try:
-        engine = NAPIER_LION_VARIANTS[int(choice) - 1]
-    except (ValueError, IndexError):
-        print("Invalid choice. Using Napier Lion VIIA.")
-        engine = NAPIER_LION_VIIA
-    gearbox = select_blue_bird_gearbox()
-    return create_blue_bird_1927(engine, gearbox)
-
-
-def select_campbell_engine():
-    print("\n=== SELECT CAMPBELL BLUE BIRD ENGINE ===")
-    for number, engine in enumerate(NAPIER_LION_VARIANTS, start=1):
-        print(f"{number}. {engine.name} ({engine.power_hp} hp, {engine.era})")
-
-    choice = input("Choose a Napier Lion variant: ").strip()
-    try:
-        engine = NAPIER_LION_VARIANTS[int(choice) - 1]
-    except (ValueError, IndexError):
-        print("Invalid choice. Using Napier Lion XI.")
-        engine = AVAILABLE_ENGINES["Napier Lion XI"]
-
-    gearbox = select_campbell_gearbox()
-    return create_campbell_napier_railton_blue_bird(engine, gearbox)
 
 
 def select_campbell_gearbox():

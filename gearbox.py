@@ -1,5 +1,6 @@
 """Gearbox definitions for Project Bonneville."""
 
+from copy import deepcopy
 from dataclasses import dataclass
 from math import pi
 
@@ -212,6 +213,142 @@ PREBUILT_GEARBOXES = (
 )
 
 
+# Simplified transmission tiers for the vehicle designer: a single freewheel
+# ratio for thrust engines (turbojets/rockets don't need a powerband to stay
+# in), and an increasingly robust, closer-ratio multi-speed ladder for piston
+# engines as their power rises.
+DIRECT_DRIVE = Gearbox(
+    name="Direct Drive",
+    gears=(1.0,),
+    final_drive=2.25,
+    shift_time_seconds=0.5,
+    clutch_time_seconds=0.25,
+    efficiency=0.95,
+    mass_kg=60.0,
+    reliability=0.92,
+    cost_gbp=5_000.0,
+    shift_up_rpm=6_000,
+    shift_down_rpm=2_000,
+)
+
+
+TWO_SPEED_TRANSMISSION = Gearbox(
+    name="2-Speed Transmission",
+    gears=(2.0, 1.0),
+    final_drive=2.2,
+    shift_time_seconds=0.8,
+    clutch_time_seconds=0.4,
+    efficiency=0.85,
+    mass_kg=90.0,
+    reliability=0.85,
+    cost_gbp=4_000.0,
+    shift_up_rpm=2_200,
+    shift_down_rpm=900,
+)
+
+
+THREE_SPEED_TRANSMISSION = Gearbox(
+    name="3-Speed Transmission",
+    gears=(2.5, 1.6, 1.0),
+    final_drive=1.15,
+    shift_time_seconds=0.65,
+    clutch_time_seconds=0.35,
+    efficiency=0.87,
+    mass_kg=140.0,
+    reliability=0.82,
+    cost_gbp=9_000.0,
+    shift_up_rpm=2_800,
+    shift_down_rpm=1_200,
+)
+
+
+FOUR_SPEED_TRANSMISSION = Gearbox(
+    name="4-Speed Transmission",
+    gears=(3.4, 2.2, 1.5, 1.0),
+    final_drive=0.90,
+    shift_time_seconds=0.55,
+    clutch_time_seconds=0.3,
+    efficiency=0.90,
+    mass_kg=190.0,
+    reliability=0.80,
+    cost_gbp=16_000.0,
+    shift_up_rpm=3_000,
+    shift_down_rpm=1_400,
+)
+
+
+FIVE_SPEED_TRANSMISSION = Gearbox(
+    name="5-Speed Transmission",
+    gears=(4.0, 2.8, 2.0, 1.4, 1.0),
+    final_drive=0.62,
+    shift_time_seconds=0.45,
+    clutch_time_seconds=0.25,
+    efficiency=0.92,
+    mass_kg=230.0,
+    reliability=0.78,
+    cost_gbp=26_000.0,
+    shift_up_rpm=3_200,
+    shift_down_rpm=1_500,
+)
+
+
+# Power brackets (engine power_hp) that select a sensible default tier for
+# piston engines. Thrust engines (turbojet/rocket) always use Direct Drive.
+PISTON_TRANSMISSION_TIERS = (
+    (100.0, TWO_SPEED_TRANSMISSION),
+    (1_000.0, THREE_SPEED_TRANSMISSION),
+    (3_000.0, FOUR_SPEED_TRANSMISSION),
+    (float("inf"), FIVE_SPEED_TRANSMISSION),
+)
+
+TRANSMISSION_CATALOG = (
+    DIRECT_DRIVE,
+    TWO_SPEED_TRANSMISSION,
+    THREE_SPEED_TRANSMISSION,
+    FOUR_SPEED_TRANSMISSION,
+    FIVE_SPEED_TRANSMISSION,
+)
+
+
 AVAILABLE_GEARBOXES = {
-    gearbox.name: gearbox for gearbox in PREBUILT_GEARBOXES
+    gearbox.name: gearbox for gearbox in PREBUILT_GEARBOXES + TRANSMISSION_CATALOG
 }
+
+
+def recommended_transmission(engine):
+    """Return the transmission tier suited to an engine's propulsion type."""
+    if engine.torque_curve_type in ("turbojet", "rocket"):
+        return DIRECT_DRIVE
+    for power_ceiling, transmission in PISTON_TRANSMISSION_TIERS:
+        if engine.power_hp <= power_ceiling:
+            return transmission
+    return FIVE_SPEED_TRANSMISSION
+
+
+def select_gearbox(engine=None):
+    if engine is not None and engine.torque_curve_type in ("turbojet", "rocket"):
+        print(
+            "\n=== SELECT GEARBOX ===\n"
+            f"{engine.name} is a thrust engine, fitted with Direct Drive "
+            "(no gears to shift)."
+        )
+        return deepcopy(DIRECT_DRIVE)
+
+    print("\n=== SELECT GEARBOX ===")
+    for number, gearbox in enumerate(TRANSMISSION_CATALOG, start=1):
+        print(
+            f"{number}. {gearbox.name} ({gearbox.gear_count} gears, "
+            f"GBP {gearbox.cost_gbp:,.0f}, {gearbox.efficiency:.0%} efficiency)"
+        )
+
+    default = recommended_transmission(engine) if engine is not None else THREE_SPEED_TRANSMISSION
+    choice = input(
+        f"Choose a gearbox (or press Enter for {default.name}): "
+    ).strip()
+    if not choice:
+        return deepcopy(default)
+    try:
+        return deepcopy(TRANSMISSION_CATALOG[int(choice) - 1])
+    except (ValueError, IndexError):
+        print(f"Invalid choice. Using {default.name}.")
+        return deepcopy(default)

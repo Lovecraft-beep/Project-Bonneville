@@ -133,9 +133,9 @@ The current catalogue contains:
 - `Jeantaud`: a 1,400 kg Welch Hemi-powered prototype with estimated
 	`Cd=0.95` and `1.7 m^2` frontal area.
 - `Campbell-Napier-Railton Blue Bird`: a 1931, 3,600 kg car using the Napier
-	Lion XI, with `Cd=0.55`, `2.3 m^2` frontal area, and `0.50 m` wheel radius.
+	Lion, with `Cd=0.55`, `2.3 m^2` frontal area, and `0.50 m` wheel radius.
 - `Irving-Napier Golden Arrow`: Major Segrave's 1929 streamlined record car,
-	using the Napier Lion VIIB and Golden Arrow 3-Speed LSR gearbox. Its recorded
+	using the Rolls-Royce R and Golden Arrow 3-Speed LSR gearbox. Its recorded
 	dimensions are 8.43 m long, 1.14 m high, with a 4.07 m wheelbase and 3,661 kg
 	mass.
 - `Stanley Steamer Rocket`: a 1906 steam-powered record car using a two-cylinder
@@ -209,13 +209,15 @@ shift time, clutch time, efficiency, mass, and reliability. The
 Campbell-Napier-Railton Blue Bird uses the `Railton 3-Speed LSR` gearbox with
 ratios `4.01`, `2.27`, and `1.24`.
 
-Vehicles can also reference an engine definition. The current catalogue
-includes a historically inspired 1920s Napier Lion VIIA: a 23.9-litre W12
-rated here at 900 hp and 1,900 Nm, with a reliability factor of 0.85. It also
-includes the 36 hp, four-cylinder Welch Hemi, weighing 120 kg and producing
-approximately 203 Nm at a 2,500 RPM limit. The Welch Hemi reliability factor
-is provisionally set to 0.80. These values are prototype data intended for gameplay
-balancing and will need to be refined as the historical database grows.
+Vehicles can also reference an engine definition. The current catalogue is a
+curated set of ten genuinely significant historical (and near-future) land
+speed record engines, including a historically inspired 1920s Napier Lion: a
+23.9-litre W12 rated here at 900 hp and 1,940 Nm, with a reliability factor
+of 0.83. It also includes the 36 hp, four-cylinder Welch Hemi, weighing 120
+kg and producing approximately 203 Nm at a 2,500 RPM limit. The Welch Hemi
+reliability factor is provisionally set to 0.80. These values are prototype
+data intended for gameplay balancing and will need to be refined as the
+historical database grows.
 
 ## Physics Notes
 
