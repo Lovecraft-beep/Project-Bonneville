@@ -234,7 +234,8 @@ def run_simulation(
             )
             next_telemetry_time += 1.0
 
-        if speed <= 0.1 and distance < track_distance:
+        if speed <= 0.1 and peak_speed > 0.1 and distance < track_distance:
+            # Genuinely stalled after having been moving, not just slow to start.
             break
 
     completed = distance >= track_distance
@@ -254,8 +255,13 @@ def run_simulation(
                 phase="decelerating",
             )
         )
-    measured_time = (measured_end_time or elapsed) - (measured_start_time or elapsed)
-    measured_speed = measured_mile_length * METRES_PER_MILE / max(measured_time, time_step)
+    if measured_start_time is None or measured_end_time is None:
+        # The measured mile was never reached; there is no valid speed to report.
+        measured_time = 0.0
+        measured_speed = 0.0
+    else:
+        measured_time = measured_end_time - measured_start_time
+        measured_speed = measured_mile_length * METRES_PER_MILE / max(measured_time, time_step)
     average_acceleration_g = acceleration_total_g / max(acceleration_step_count, 1)
     average_deceleration_g = deceleration_total_g / max(deceleration_step_count, 1)
     full_throttle_seconds = measured_end_time or elapsed

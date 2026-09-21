@@ -40,12 +40,26 @@ class CombinationCompatibilityTests(unittest.TestCase):
                         gears = {sample.gear for sample in result.telemetry}
                         # Turbojet/rocket engines are intended for direct-drive
                         # cars, not period multi-speed gearboxes, so pairing
-                        # them here can legitimately stay in first gear.
+                        # them here can legitimately stay in first gear. Some
+                        # underpowered pairings also legitimately plateau
+                        # (power-limited) below the shift RPM rather than
+                        # failing to shift due to a logic bug: shift_if_needed
+                        # shifts deterministically as soon as engine_rpm meets
+                        # its threshold, so only flag cases that actually
+                        # reached that exact threshold without shifting.
+                        max_engine_rpm_seen = max(
+                            (sample.engine_rpm for sample in result.telemetry),
+                            default=0,
+                        )
+                        shift_threshold = min(
+                            gearbox.shift_up_rpm, engine.max_rpm * 0.90
+                        )
                         if (
                             engine.torque_curve_type not in ("turbojet", "rocket")
                             and gearbox.gear_count > 1
                             and result.peak_speed_mph > 20
                             and gears == {1}
+                            and max_engine_rpm_seen >= shift_threshold - 1
                         ):
                             stuck_cases.append(
                                 f"{car_key}/{engine.name}/{gearbox.name}/{track.name}"

@@ -50,11 +50,11 @@ def _build_catalog():
             "improvised_chassis",
             "Improvised Chassis",
             "A crude, unresearched frame bolted together from whatever is on hand.",
-            mass_kg=_MASS_KG_RANGE[0] * 1.1,
-            drag_coefficient=_DRAG_COEFFICIENT_RANGE[0] * 1.1,
-            frontal_area_m2=_FRONTAL_AREA_M2_RANGE[0] * 1.05,
-            tyre_grip_factor=_TYRE_GRIP_FACTOR_RANGE[0] * 0.9,
-            wheel_radius_m=_WHEEL_RADIUS_M_RANGE[0] * 1.05,
+            mass_kg=round(_MASS_KG_RANGE[0] * 1.1, 1),
+            drag_coefficient=round(_DRAG_COEFFICIENT_RANGE[0] * 1.1, 3),
+            frontal_area_m2=round(_FRONTAL_AREA_M2_RANGE[0] * 1.05, 2),
+            tyre_grip_factor=round(_TYRE_GRIP_FACTOR_RANGE[0] * 0.9, 2),
+            wheel_radius_m=round(_WHEEL_RADIUS_M_RANGE[0] * 1.05, 2),
             cost_gbp=3_000.0,
         )
     ]
