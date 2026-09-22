@@ -3,7 +3,6 @@
 import random
 from dataclasses import dataclass
 
-
 MIN_SPEED_FACTOR = 0.25
 REFERENCE_SPEED_MPH = 250.0
 MIN_TEAM_SKILL_MODIFIER = 0.5
@@ -44,11 +43,15 @@ def calculate_speed_factor(peak_speed_mph):
 
 def calculate_team_skill_modifier(team, sponsor_reliability_bonus=0.0):
     """Reduce failure risk as engineers, mechanics, and sponsors are added."""
-    staff_skill = 0.08 * team.engineers + 0.04 * team.mechanics + sponsor_reliability_bonus
+    staff_skill = (
+        0.08 * team.engineers + 0.04 * team.mechanics + sponsor_reliability_bonus
+    )
     return max(MIN_TEAM_SKILL_MODIFIER, 1.0 - staff_skill)
 
 
-def calculate_failure_probability(engine, peak_speed_mph, team, sponsor_reliability_bonus=0.0):
+def calculate_failure_probability(
+    engine, peak_speed_mph, team, sponsor_reliability_bonus=0.0
+):
     """Return the engine failure probability for a completed simulation."""
     speed_factor = calculate_speed_factor(peak_speed_mph)
     team_skill_modifier = calculate_team_skill_modifier(team, sponsor_reliability_bonus)
@@ -56,9 +59,7 @@ def calculate_failure_probability(engine, peak_speed_mph, team, sponsor_reliabil
         1.0,
         max(
             0.0,
-            (1.0 - engine.reliability)
-            * speed_factor
-            * team_skill_modifier,
+            (1.0 - engine.reliability) * speed_factor * team_skill_modifier,
         ),
     )
 
@@ -94,20 +95,22 @@ def resolve_run_failure(
         (OIL_LEAK, engine_failure_probability * 0.25),
         (
             GEAR_FAILURE,
-            (1.0 - gearbox.reliability) * speed_factor * team_skill_modifier
-            if gearbox is not None
-            else 0.0,
+            (
+                (1.0 - gearbox.reliability) * speed_factor * team_skill_modifier
+                if gearbox is not None
+                else 0.0
+            ),
         ),
         (TYRE_BURST, 0.02 * speed_factor * team_skill_modifier),
         (
             BRAKE_FADE,
-            (0.20 if brake_fade else 0.01)
-            * speed_factor
-            * team_skill_modifier,
+            (0.20 if brake_fade else 0.01) * speed_factor * team_skill_modifier,
         ),
         (STEERING_VIBRATION, 0.015 * speed_factor * team_skill_modifier),
     ]
-    failure_probability = min(1.0, sum(probability for _, probability in failure_events))
+    failure_probability = min(
+        1.0, sum(probability for _, probability in failure_events)
+    )
     sample = random.random() if random_value is None else random_value
     failed = sample < failure_probability
     failure_type = None

@@ -41,18 +41,16 @@ class BrakeSystem:
     def calculate_force(self, mass_kg, available_grip_force):
         """Return usable mechanical braking force in newtons."""
         brake_capability = (
-            self.max_braking_g
-            * 9.81
-            * mass_kg
-            * self.efficiency
-            * self.fade_factor
+            self.max_braking_g * 9.81 * mass_kg * self.efficiency * self.fade_factor
         )
         return min(brake_capability, available_grip_force)
 
     def update_temperature(self, braking_force_n, speed_m_per_second, time_step):
         heat_watts = braking_force_n * speed_m_per_second
         cooling_watts = max(0.0, self.temperature_c - 20.0) * self.cooling_rate_w_per_c
-        temperature_change = (heat_watts - cooling_watts) * time_step / self.heat_capacity_j_per_c
+        temperature_change = (
+            (heat_watts - cooling_watts) * time_step / self.heat_capacity_j_per_c
+        )
         self.temperature_c = max(20.0, self.temperature_c + temperature_change)
 
     def reset(self):

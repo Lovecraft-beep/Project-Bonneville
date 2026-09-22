@@ -1,14 +1,54 @@
 import unittest
+from math import pi
 
-from cars import create_blue_bird_1927
-from cars import create_darracq_1905
+from cars import create_blue_bird_1927, create_darracq_1905
 from engines import NAPIER_LION, ROLLS_ROYCE_R
 from gearbox import GOLDEN_ARROW_3_SPEED, Gearbox
-from tracks import BONNEVILLE_SALT_FLATS, DAYTONA_BEACH
 from simulation import run_simulation
+from tracks import BONNEVILLE_SALT_FLATS, DAYTONA_BEACH
 
 
 class GearboxShiftTests(unittest.TestCase):
+    def test_measured_mile_starting_at_zero_includes_initial_timestep(self):
+        vehicle = create_blue_bird_1927(engine=NAPIER_LION)
+
+        result = run_simulation(
+            vehicle,
+            track_miles=1.0,
+            measured_mile_start=0.0,
+            measured_mile_length=0.5,
+            time_step=0.1,
+        )
+
+        self.assertGreater(result.measured_mile_time_seconds, 0.0)
+        self.assertLess(
+            result.measured_mile_time_seconds,
+            result.total_time_seconds,
+        )
+
+    def test_telemetry_rpm_matches_recorded_gear(self):
+        vehicle = create_blue_bird_1927(engine=NAPIER_LION)
+
+        result = run_simulation(
+            vehicle,
+            track_miles=10.0,
+            measured_mile_start=4.0,
+            measured_mile_length=1.0,
+        )
+
+        for sample in result.telemetry:
+            wheel_revolutions_per_second = (
+                sample.speed_mph / 2.23694
+                / (2 * pi * vehicle.wheel_radius_m)
+            )
+            expected_rpm = (
+                wheel_revolutions_per_second
+                * 60
+                * vehicle.gearbox.gears[sample.gear - 1]
+                * vehicle.gearbox.final_drive_ratio
+            )
+            self.assertAlmostEqual(sample.engine_rpm, expected_rpm, delta=25)
+
     def test_shift_occurs_before_engine_redline(self):
         gearbox = Gearbox(
             name="Test 3-Speed",

@@ -39,8 +39,8 @@ def _interpolate_exponential(start, end, fraction):
 def _construction_cost_gbp(tier_number):
     """Escalate construction cost across the 25-tier lineage."""
     era_index, tier_index = divmod(tier_number, 5)
-    base = 2_000.0 * (1.8 ** era_index)
-    return round(base * (1.15 ** tier_index) / 100) * 100
+    base = 2_000.0 * (1.8**era_index)
+    return round(base * (1.15**tier_index) / 100) * 100
 
 
 def _build_catalog():
@@ -75,9 +75,7 @@ def _build_catalog():
                 tyre_grip_factor=round(
                     _interpolate(*_TYRE_GRIP_FACTOR_RANGE, fraction), 2
                 ),
-                wheel_radius_m=round(
-                    _interpolate(*_WHEEL_RADIUS_M_RANGE, fraction), 2
-                ),
+                wheel_radius_m=round(_interpolate(*_WHEEL_RADIUS_M_RANGE, fraction), 2),
                 cost_gbp=_construction_cost_gbp(tier_number),
                 required_technology=node.technology_id,
             )

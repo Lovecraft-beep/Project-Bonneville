@@ -1,10 +1,9 @@
 """Diagnostic logging for the currently built test vehicle."""
 
+import json
 from dataclasses import asdict
 from datetime import datetime
-import json
 from pathlib import Path
-
 
 DIAGNOSTIC_LOG_FILE = Path(__file__).with_name("test_vehicle_diagnostics.log")
 

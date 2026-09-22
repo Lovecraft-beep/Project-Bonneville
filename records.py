@@ -1,10 +1,9 @@
 """Persistent historical run records for Project Bonneville."""
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
-import json
 from pathlib import Path
-
 
 RECORDS_FILE = Path(__file__).with_name("historical_records.json")
 

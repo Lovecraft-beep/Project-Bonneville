@@ -1,10 +1,16 @@
 # Project6 Bonneville
 
-from simulation import run_simulation
 from cars import select_car
 from chassis import available_chassis
+from diagnostics import append_run_log
+from encyclopedia import run_encyclopedia
 from engines import available_engines
+from gearbox import estimate_gear_limited_speed_mph, estimate_power_limited_speed_mph
+from historical_challenges import run_historical_challenges
 from management import (
+    ENGINEER_HIRE_COST_GBP,
+    MECHANIC_HIRE_COST_GBP,
+    CampaignState,
     advance_turn,
     build_vehicle,
     calculate_run_cost,
@@ -21,34 +27,25 @@ from management import (
     save_campaign,
     sign_sponsor,
     upgrade_workshop,
-    CampaignState,
-    ENGINEER_HIRE_COST_GBP,
-    MECHANIC_HIRE_COST_GBP,
 )
 from records import create_record, display_records, load_records, save_record
-from diagnostics import append_run_log
+from reliability import resolve_run_failure
 from research import (
-    available_chassis_technologies,
-    available_engine_technologies,
-    current_chassis_era,
     CHASSIS_TECHNOLOGY_TREE,
     ENGINE_TECHNOLOGY_TREE,
     ERA_BY_NAME,
+    available_chassis_technologies,
+    available_engine_technologies,
+    current_chassis_era,
 )
-from reliability import resolve_run_failure
+from simulation import run_simulation
 from sponsors import available_sponsors
 from tracks import select_track
-from gearbox import estimate_gear_limited_speed_mph, estimate_power_limited_speed_mph
 from vehicle_designer import change_vehicle_component, design_vehicle
-from encyclopedia import run_encyclopedia
-from historical_challenges import run_historical_challenges
 
 
 def print_status(campaign):
-    print(
-        f"\nTurn {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"\nTurn {campaign.turn_number} | {campaign.current_year} season")
     print(f"Team: {campaign.team.name}")
     print(f"Campaign funds: GBP {campaign.team.cash:,.0f}")
     print(f"Reputation: {campaign.team.reputation:.1f}")
@@ -102,14 +99,17 @@ def print_status(campaign):
         )
     if campaign.best_measured_mile_speed_mph:
         print(
-            f"Best measured-mile speed: "
-            f"{campaign.best_measured_mile_speed_mph:.1f} mph"
+            f"Best measured-mile speed: {campaign.best_measured_mile_speed_mph:.1f} mph"
         )
 
 
 def print_run_telemetry(result):
-    print("\nTime   Distance   Speed   RPM    Accel G   Gear   Shift   Wheelspin   Brake C   Fade   Phase")
-    print("----   --------   -----   -----  -------   ----   -----   ---------   -------   ----   ----------------")
+    print(
+        "\nTime   Distance   Speed   RPM    Accel G   Gear   Shift   Wheelspin   Brake C   Fade   Phase"
+    )
+    print(
+        "----   --------   -----   -----  -------   ----   -----   ---------   -------   ----   ----------------"
+    )
     for sample in result.telemetry:
         print(
             f"{sample.time_seconds:4.1f}   "
@@ -118,10 +118,10 @@ def print_run_telemetry(result):
             f"{sample.engine_rpm:5}  "
             f"{sample.acceleration_g:7.3f}   "
             f"{sample.gear:4}   "
-            f"{str(sample.shifting):5}   "
-            f"{str(sample.wheelspin):9}   "
+            f"{sample.shifting!s:5}   "
+            f"{sample.wheelspin!s:9}   "
             f"{sample.brake_temperature_c:7.1f}   "
-            f"{str(sample.brake_fade):4}   "
+            f"{sample.brake_fade!s:4}   "
             f"{sample.phase}"
         )
 
@@ -141,14 +141,44 @@ def print_run_summary(result):
 def print_run_comparison(baseline, rerun):
     """Print the performance change between two runs on the same track."""
     comparisons = (
-        ("Measured mile speed", baseline.measured_mile_speed_mph, rerun.measured_mile_speed_mph, "mph"),
+        (
+            "Measured mile speed",
+            baseline.measured_mile_speed_mph,
+            rerun.measured_mile_speed_mph,
+            "mph",
+        ),
         ("Peak speed", baseline.peak_speed_mph, rerun.peak_speed_mph, "mph"),
-        ("Measured mile time", baseline.measured_mile_time_seconds, rerun.measured_mile_time_seconds, "s"),
-        ("Average acceleration", baseline.average_acceleration_g, rerun.average_acceleration_g, "G"),
-        ("Average deceleration", baseline.average_deceleration_g, rerun.average_deceleration_g, "G"),
-        ("Maximum brake temperature", baseline.maximum_brake_temperature_c, rerun.maximum_brake_temperature_c, "C"),
+        (
+            "Measured mile time",
+            baseline.measured_mile_time_seconds,
+            rerun.measured_mile_time_seconds,
+            "s",
+        ),
+        (
+            "Average acceleration",
+            baseline.average_acceleration_g,
+            rerun.average_acceleration_g,
+            "G",
+        ),
+        (
+            "Average deceleration",
+            baseline.average_deceleration_g,
+            rerun.average_deceleration_g,
+            "G",
+        ),
+        (
+            "Maximum brake temperature",
+            baseline.maximum_brake_temperature_c,
+            rerun.maximum_brake_temperature_c,
+            "C",
+        ),
         ("Gear changes", baseline.gear_change_count, rerun.gear_change_count, ""),
-        ("Wheelspin events", baseline.wheelspin_event_count, rerun.wheelspin_event_count, ""),
+        (
+            "Wheelspin events",
+            baseline.wheelspin_event_count,
+            rerun.wheelspin_event_count,
+            "",
+        ),
     )
     print("\n=== TEST RUN COMPARISON ===")
     print(f"{'Metric':<28} {'Before':>12} {'After':>12} {'Change':>12}")
@@ -174,9 +204,11 @@ def print_gearbox_warning(vehicle):
 
 def offer_component_rerun(campaign, vehicle, track, result):
     """Offer a same-track rerun with one changed vehicle component."""
-    change_choice = input(
-        "Change a component and run this vehicle again? (yes/no): "
-    ).strip().lower()
+    change_choice = (
+        input("Change a component and run this vehicle again? (yes/no): ")
+        .strip()
+        .lower()
+    )
     if change_choice == "yes" and change_vehicle_component(
         vehicle,
         campaign,
@@ -249,20 +281,14 @@ def action_test_run(campaign, vehicle=None, track=None, comparison_result=None):
         else:
             print("The team did not have enough staff for a trackside repair.")
         print(f"Failed runs: {campaign.failed_runs}")
-        print(
-            f"Next turn: {campaign.turn_number} | "
-            f"{campaign.current_year} season"
-        )
+        print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
         offer_component_rerun(campaign, vehicle, track, result)
         return
 
     complete_run(campaign, run_cost, result.measured_mile_speed_mph)
     advance_turn(campaign)
     save_campaign(campaign)
-    print(
-        f"Next turn: {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
     print(f"Campaign funds remaining: GBP {campaign.team.cash:,.0f}")
 
     record = create_record(vehicle, track, result, campaign)
@@ -309,10 +335,7 @@ def action_research_engines(campaign):
     advance_turn(campaign)
     save_campaign(campaign)
     print(f"Researched {technology.name}.")
-    print(
-        f"Next turn: {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
 
 
 def action_research_chassis(campaign):
@@ -351,10 +374,7 @@ def action_research_chassis(campaign):
     advance_turn(campaign)
     save_campaign(campaign)
     print(f"Researched {technology.name}.")
-    print(
-        f"Next turn: {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
 
 
 def action_research_gearbox(campaign):
@@ -386,10 +406,7 @@ def action_hire_engineer(campaign):
         f"Hired an engineer for GBP {ENGINEER_HIRE_COST_GBP:,.0f}. "
         f"Engineers: {campaign.team.engineers}."
     )
-    print(
-        f"Next turn: {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
 
 
 def action_hire_mechanic(campaign):
@@ -405,10 +422,7 @@ def action_hire_mechanic(campaign):
         f"Hired a mechanic for GBP {MECHANIC_HIRE_COST_GBP:,.0f}. "
         f"Mechanics: {campaign.team.mechanics}."
     )
-    print(
-        f"Next turn: {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
 
 
 def action_upgrade_workshop(campaign):
@@ -425,18 +439,19 @@ def action_upgrade_workshop(campaign):
         f"Upgraded the workshop for GBP {cost_gbp:,.0f}. "
         f"Workshop level: {campaign.team.workshop_level}."
     )
-    print(
-        f"Next turn: {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
 
 
 def action_reset_campaign(campaign):
     """Erase the saved campaign and records, starting over from scratch."""
-    confirm = input(
-        "This will erase the current campaign and start a new one. "
-        "Type 'yes' to confirm: "
-    ).strip().lower()
+    confirm = (
+        input(
+            "This will erase the current campaign and start a new one. "
+            "Type 'yes' to confirm: "
+        )
+        .strip()
+        .lower()
+    )
     if confirm != "yes":
         print("Reset cancelled.")
         return None
@@ -486,10 +501,7 @@ def action_sponsorship(campaign):
     advance_turn(campaign)
     save_campaign(campaign)
     print(f"Signed {sponsor.name}.")
-    print(
-        f"Next turn: {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
 
 
 def action_design_vehicle(campaign):
@@ -507,10 +519,7 @@ def action_design_vehicle(campaign):
     advance_turn(campaign)
     save_campaign(campaign)
     print(f"Built {garage_entry.vehicle_name} and added it to the garage.")
-    print(
-        f"Next turn: {campaign.turn_number} | "
-        f"{campaign.current_year} season"
-    )
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
 
 
 MENU_ACTIONS = {
@@ -592,9 +601,11 @@ def run_facility_vehicle_test(campaign, vehicle, track):
         if previous_result is not None:
             print_run_comparison(previous_result, result)
 
-        redesign = input(
-            "Redesign a component and rerun this vehicle? (yes/no): "
-        ).strip().lower()
+        redesign = (
+            input("Redesign a component and rerun this vehicle? (yes/no): ")
+            .strip()
+            .lower()
+        )
         if redesign != "yes" or not change_vehicle_component(
             vehicle, campaign, allow_gearbox_optimization=True
         ):
@@ -635,7 +646,7 @@ def run_engineering_test_facility():
 
 
 def main():
-    print('LSR Simulator')
+    print("LSR Simulator")
 
     while True:
         print("\n=== PROJECT BONNEVILLE ===")

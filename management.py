@@ -5,6 +5,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from diagnostics import reset_vehicle_log
 from research import (
     AERODYNAMICS_TECHNOLOGY_BY_ID,
     BRAKE_TECHNOLOGY_BY_ID,
@@ -14,8 +15,6 @@ from research import (
     TYRE_TECHNOLOGY_BY_ID,
 )
 from sponsors import SPONSOR_BY_ID
-from diagnostics import reset_vehicle_log
-
 
 CAMPAIGN_FILE = Path(__file__).with_name("campaign_state.json")
 STARTING_FUNDS_GBP = 100_000.0
@@ -363,7 +362,9 @@ def _research_branch_technology(campaign, technology_id, tree_by_id, researched,
         raise ValueError(f"{technology.name} has already been researched")
     available_research = set(researched) | set(campaign.research.chassis_technology)
     if not set(technology.prerequisites).issubset(available_research):
-        raise ValueError(f"chassis or branch prerequisites not met for {technology.name}")
+        raise ValueError(
+            f"chassis or branch prerequisites not met for {technology.name}"
+        )
     if campaign.team.cash < technology.cost_gbp:
         raise ValueError("insufficient funds for this research project")
     if campaign.team.engineers < technology.engineers_required:

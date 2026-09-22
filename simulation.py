@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-
 METRES_PER_MILE = 1609.344
 HORSEPOWER_IN_WATTS = 745.7
 STANDARD_AIR_DENSITY = 1.2
@@ -47,13 +46,7 @@ def calculate_drag_force(
     air_density_kg_m3=STANDARD_AIR_DENSITY,
 ):
     """Return aerodynamic drag in newtons at the given speed."""
-    return (
-        0.5
-        * vehicle.cd
-        * air_density_kg_m3
-        * speed_m_per_second**2
-        * vehicle.area
-    )
+    return 0.5 * vehicle.cd * air_density_kg_m3 * speed_m_per_second**2 * vehicle.area
 
 
 def calculate_wheel_torque(vehicle, engine_rpm):
@@ -93,7 +86,9 @@ def run_simulation(
         or track_friction_factor <= 0
         or air_density_kg_m3 <= 0
     ):
-        raise ValueError("vehicle values and friction factors must be greater than zero")
+        raise ValueError(
+            "vehicle values and friction factors must be greater than zero"
+        )
 
     rolling_resistance = 0.015
     drivetrain_efficiency = 0.85
@@ -112,7 +107,7 @@ def run_simulation(
     speed = 0.0
     elapsed = 0.0
     peak_speed = 0.0
-    measured_start_time = None
+    measured_start_time = 0.0 if measured_start == 0 else None
     measured_end_time = None
     next_telemetry_time = 1.0
     previous_gear = 1
@@ -127,7 +122,9 @@ def run_simulation(
     vehicle.gearbox.pending_gear = None
     vehicle.gearbox.shift_elapsed = 0.0
     telemetry = [
-        TelemetrySample(0.0, 0.0, 0.0, 0, 0.0, False, 1, False, 20.0, False, "accelerating")
+        TelemetrySample(
+            0.0, 0.0, 0.0, 0, 0.0, False, 1, False, 20.0, False, "accelerating"
+        )
     ]
 
     while distance < track_distance and elapsed < 3600:
@@ -217,12 +214,15 @@ def run_simulation(
                 phase = "measured mile"
             else:
                 phase = "decelerating"
+            telemetry_engine_rpm = vehicle.gearbox.engine_rpm(
+                speed, vehicle.wheel_radius_m
+            )
             telemetry.append(
                 TelemetrySample(
                     time_seconds=round(next_telemetry_time, 1),
                     distance_miles=round(distance / METRES_PER_MILE, 3),
                     speed_mph=round(speed * 2.23694, 1),
-                    engine_rpm=round(engine_rpm),
+                    engine_rpm=round(telemetry_engine_rpm),
                     acceleration_g=round(acceleration_g, 3),
                     wheelspin=wheelspin,
                     gear=vehicle.gearbox.current_gear,
@@ -261,7 +261,9 @@ def run_simulation(
         measured_speed = 0.0
     else:
         measured_time = measured_end_time - measured_start_time
-        measured_speed = measured_mile_length * METRES_PER_MILE / max(measured_time, time_step)
+        measured_speed = (
+            measured_mile_length * METRES_PER_MILE / max(measured_time, time_step)
+        )
     average_acceleration_g = acceleration_total_g / max(acceleration_step_count, 1)
     average_deceleration_g = deceleration_total_g / max(deceleration_step_count, 1)
     full_throttle_seconds = measured_end_time or elapsed

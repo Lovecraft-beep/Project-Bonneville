@@ -4,12 +4,12 @@ from copy import deepcopy
 
 from brakes import DRUM_BRAKES_1920S, BrakeSystem
 from engines import (
-    NAPIER_LION,
+    AVAILABLE_ENGINES,
     DARRACQ_V8_25_LITRE,
+    NAPIER_LION,
     STANLEY_STEAM_ENGINE,
     WELCH_HEMI,
 )
-from engines import AVAILABLE_ENGINES
 from gearbox import (
     BLUE_BIRD_GEARBOX,
     BLUE_BIRD_GEARBOXES,
@@ -209,7 +209,9 @@ def select_car(campaign=None):
     if choice == "2":
         return create_blue_bird_1927(gearbox=select_blue_bird_gearbox())
     if choice == "4":
-        return create_campbell_napier_railton_blue_bird(gearbox=select_campbell_gearbox())
+        return create_campbell_napier_railton_blue_bird(
+            gearbox=select_campbell_gearbox()
+        )
     return AVAILABLE_CARS[choice]()
 
 

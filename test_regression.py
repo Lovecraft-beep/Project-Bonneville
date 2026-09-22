@@ -23,13 +23,17 @@ from management import (
     build_vehicle,
     hire_engineer,
     load_campaign,
-    reset_campaign,
     research_chassis_technology,
     research_engine_technology,
+    reset_campaign,
     save_campaign,
     sign_sponsor,
 )
-from research import CHASSIS_TECHNOLOGY_TREE, ENGINE_TECHNOLOGY_TREE, current_chassis_era
+from research import (
+    CHASSIS_TECHNOLOGY_TREE,
+    ENGINE_TECHNOLOGY_TREE,
+    current_chassis_era,
+)
 from simulation import run_simulation
 from sponsors import SPONSOR_CATALOG
 from tracks import BONNEVILLE_SALT_FLATS

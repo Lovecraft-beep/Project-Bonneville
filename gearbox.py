@@ -4,7 +4,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from math import pi
 
-
 HORSEPOWER_IN_WATTS = 745.7
 METRES_PER_MILE = 1609.344
 
@@ -40,9 +39,7 @@ class Gearbox:
             raise ValueError("shift_up_rpm must be greater than zero")
         if self.shift_down_rpm <= 0 or self.shift_down_rpm >= self.shift_up_rpm:
             raise ValueError("shift_down_rpm must be below shift_up_rpm")
-        if (
-            not 0 <= self.clutch_slip_factor < 1
-        ):
+        if not 0 <= self.clutch_slip_factor < 1:
             raise ValueError("shift timings and clutch slip must be valid")
 
     @property
@@ -63,7 +60,12 @@ class Gearbox:
 
     def engine_rpm(self, speed_m_per_second, wheel_radius_m):
         wheel_revolutions_per_second = speed_m_per_second / (2 * pi * wheel_radius_m)
-        return wheel_revolutions_per_second * 60 * self.current_ratio * self.final_drive_ratio
+        return (
+            wheel_revolutions_per_second
+            * 60
+            * self.current_ratio
+            * self.final_drive_ratio
+        )
 
     @property
     def shift_duration(self):
@@ -74,7 +76,11 @@ class Gearbox:
         return self.pending_gear is not None
 
     def shift_if_needed(self, engine_rpm, decelerating=False, rpm_limit=None):
-        upshift_rpm = self.shift_up_rpm if rpm_limit is None else min(self.shift_up_rpm, rpm_limit)
+        upshift_rpm = (
+            self.shift_up_rpm
+            if rpm_limit is None
+            else min(self.shift_up_rpm, rpm_limit)
+        )
         if (
             not self.shifting
             and engine_rpm >= upshift_rpm
@@ -156,9 +162,7 @@ def optimize_gearbox_for_engine(vehicle):
     target_speed_mps = target_speed_mph / 2.23694
     usable_rpm = vehicle.engine.max_rpm * 0.98
     wheel_revolutions_per_second = target_speed_mps / (2 * pi * vehicle.wheel_radius_m)
-    target_overall_ratio = (
-        usable_rpm / (wheel_revolutions_per_second * 60)
-    )
+    target_overall_ratio = usable_rpm / (wheel_revolutions_per_second * 60)
     gear_count = max(1, gearbox.gear_count)
     final_drive = min(3.5, max(0.62, target_overall_ratio / 2.5))
     top_ratio = target_overall_ratio / final_drive
@@ -406,16 +410,20 @@ def select_gearbox(engine=None, current_gearbox=None):
 
     print("\n=== SELECT GEARBOX ===")
     for number, gearbox in enumerate(TRANSMISSION_CATALOG, start=1):
-        marker = "* " if current_gearbox and gearbox.name == current_gearbox.name else "  "
+        marker = (
+            "* " if current_gearbox and gearbox.name == current_gearbox.name else "  "
+        )
         print(
             f"{number}. {marker}{gearbox.name} ({gearbox.gear_count} gears, "
             f"GBP {gearbox.cost_gbp:,.0f}, {gearbox.efficiency:.0%} efficiency)"
         )
 
-    default = recommended_transmission(engine) if engine is not None else THREE_SPEED_TRANSMISSION
-    choice = input(
-        f"Choose a gearbox (or press Enter for {default.name}): "
-    ).strip()
+    default = (
+        recommended_transmission(engine)
+        if engine is not None
+        else THREE_SPEED_TRANSMISSION
+    )
+    choice = input(f"Choose a gearbox (or press Enter for {default.name}): ").strip()
     if not choice:
         return deepcopy(default)
     try:

@@ -34,7 +34,11 @@ class Era:
 
     @property
     def year_range_label(self):
-        return f"{self.year_start}-{self.year_end}" if self.year_end else f"{self.year_start}+"
+        return (
+            f"{self.year_start}-{self.year_end}"
+            if self.year_end
+            else f"{self.year_start}+"
+        )
 
 
 def _slugify(name):
@@ -43,8 +47,8 @@ def _slugify(name):
 
 def _tier_cost_gbp(era_index, tier_index):
     """Escalate research cost by era (doubling) and by tier within an era."""
-    base = 5_000.0 * (2 ** era_index)
-    return round(base * (1.25 ** tier_index) / 500) * 500
+    base = 5_000.0 * (2**era_index)
+    return round(base * (1.25**tier_index) / 500) * 500
 
 
 def _tier_engineers_required(era_index, tier_index):
@@ -271,7 +275,8 @@ def _build_trees(era_definitions):
         for engine_tier_index, engine_name in enumerate(engine_tiers):
             if len(engine_tiers) > 1:
                 chassis_index = round(
-                    engine_tier_index * (len(era_chassis_ids) - 1)
+                    engine_tier_index
+                    * (len(era_chassis_ids) - 1)
                     / (len(engine_tiers) - 1)
                 )
             else:
@@ -310,9 +315,11 @@ def _build_branch_tree(era_definitions, branch_key):
         era_chassis_ids = [_slugify(name) for name in definition["chassis_tiers"]]
         tier_names = definition[branch_key]
         for tier_index, technology_name in enumerate(tier_names):
-            chassis_index = round(
-                tier_index * (len(era_chassis_ids) - 1) / (len(tier_names) - 1)
-            ) if len(tier_names) > 1 else 0
+            chassis_index = (
+                round(tier_index * (len(era_chassis_ids) - 1) / (len(tier_names) - 1))
+                if len(tier_names) > 1
+                else 0
+            )
             prerequisites = tuple(
                 prerequisite
                 for prerequisite in (previous_id, era_chassis_ids[chassis_index])
@@ -355,9 +362,7 @@ for _definition in ERA_DEFINITIONS:
 
 
 CHASSIS_TECHNOLOGY_TREE, ENGINE_TECHNOLOGY_TREE, ERAS = _build_trees(ERA_DEFINITIONS)
-AERODYNAMICS_TECHNOLOGY_TREE = _build_branch_tree(
-    ERA_DEFINITIONS, "aerodynamics_tiers"
-)
+AERODYNAMICS_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "aerodynamics_tiers")
 TYRE_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "tyre_tiers")
 BRAKE_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "brake_tiers")
 GEARBOX_TECHNOLOGY_TREE = (
@@ -374,9 +379,7 @@ GEARBOX_TECHNOLOGY_TREE = (
 CHASSIS_TECHNOLOGY_BY_ID = {
     node.technology_id: node for node in CHASSIS_TECHNOLOGY_TREE
 }
-ENGINE_TECHNOLOGY_BY_ID = {
-    node.technology_id: node for node in ENGINE_TECHNOLOGY_TREE
-}
+ENGINE_TECHNOLOGY_BY_ID = {node.technology_id: node for node in ENGINE_TECHNOLOGY_TREE}
 AERODYNAMICS_TECHNOLOGY_BY_ID = {
     node.technology_id: node for node in AERODYNAMICS_TECHNOLOGY_TREE
 }

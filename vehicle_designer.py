@@ -6,8 +6,7 @@ from dataclasses import replace
 from brakes import BRAKE_BY_NAME, select_brakes
 from chassis import CHASSIS_BY_ID, select_chassis
 from engines import AVAILABLE_ENGINES, select_engine
-from gearbox import AVAILABLE_GEARBOXES, select_gearbox
-from gearbox import optimize_gearbox_for_engine
+from gearbox import AVAILABLE_GEARBOXES, optimize_gearbox_for_engine, select_gearbox
 from management import GarageVehicle
 from vehicle import Vehicle
 
@@ -38,10 +37,7 @@ def design_vehicle(campaign):
     )
 
     cost_gbp = round(
-        chassis.cost_gbp
-        + engine.purchase_cost_gbp
-        + gearbox.cost_gbp
-        + brakes.cost_gbp
+        chassis.cost_gbp + engine.purchase_cost_gbp + gearbox.cost_gbp + brakes.cost_gbp
     )
 
     print("\n=== REVIEW SPECIFICATION ===")

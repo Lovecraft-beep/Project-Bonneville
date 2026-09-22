@@ -1,6 +1,4 @@
-from engines import Engine
 from gearbox import Gearbox
-from brakes import BrakeSystem
 
 
 # Define the Vehicle class
