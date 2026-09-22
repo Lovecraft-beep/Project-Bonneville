@@ -283,7 +283,7 @@ def available_engines(researched_technologies):
     )
 
 
-def select_engine(researched_technologies=()):
+def select_engine(researched_technologies=(), current_engine=None):
     print("\n=== SELECT ENGINE ===")
     engine_choices = available_engines(researched_technologies)
     if not engine_choices:
@@ -291,8 +291,9 @@ def select_engine(researched_technologies=()):
         return STANLEY_STEAM_ENGINE
 
     for number, engine in enumerate(engine_choices, start=1):
+        marker = "* " if current_engine and engine.name == current_engine.name else "  "
         print(
-            f"{number}. {engine.name} ({engine.power_hp} hp, "
+            f"{number}. {marker}{engine.name} ({engine.power_hp} hp, "
             f"GBP {engine.purchase_cost_gbp:,}, reliability {engine.reliability:.0%})"
         )
 

@@ -301,13 +301,89 @@ def _build_trees(era_definitions):
     return tuple(chassis_tree), tuple(engine_tree), tuple(eras)
 
 
+def _build_branch_tree(era_definitions, branch_key):
+    """Build a branch whose tiers are anchored to the matching chassis era."""
+    branch_tree = []
+    previous_id = None
+
+    for era_index, definition in enumerate(era_definitions):
+        era_chassis_ids = [_slugify(name) for name in definition["chassis_tiers"]]
+        tier_names = definition[branch_key]
+        for tier_index, technology_name in enumerate(tier_names):
+            chassis_index = round(
+                tier_index * (len(era_chassis_ids) - 1) / (len(tier_names) - 1)
+            ) if len(tier_names) > 1 else 0
+            prerequisites = tuple(
+                prerequisite
+                for prerequisite in (previous_id, era_chassis_ids[chassis_index])
+                if prerequisite
+            )
+            technology_id = _slugify(technology_name)
+            if era_index:
+                technology_id = f"{technology_id}_{era_index}"
+            branch_tree.append(
+                TechnologyNode(
+                    technology_id,
+                    technology_name,
+                    definition["name"],
+                    prerequisites,
+                    _tier_cost_gbp(era_index, chassis_index),
+                    _tier_engineers_required(era_index, chassis_index),
+                )
+            )
+            previous_id = technology_id
+
+    return tuple(branch_tree)
+
+
+for _definition in ERA_DEFINITIONS:
+    _definition["aerodynamics_tiers"] = (
+        "Basic Streamlining",
+        "Racing Streamlining",
+        "Advanced Aerodynamics",
+    )
+    _definition["tyre_tiers"] = (
+        "Pneumatic Racing Tyres",
+        "High-Speed Tyres",
+        "Specialised Record Tyres",
+    )
+    _definition["brake_tiers"] = (
+        "Mechanical Drum Brakes",
+        "Hydraulic Disc Brakes",
+        "High-Temperature Brakes",
+    )
+
+
 CHASSIS_TECHNOLOGY_TREE, ENGINE_TECHNOLOGY_TREE, ERAS = _build_trees(ERA_DEFINITIONS)
+AERODYNAMICS_TECHNOLOGY_TREE = _build_branch_tree(
+    ERA_DEFINITIONS, "aerodynamics_tiers"
+)
+TYRE_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "tyre_tiers")
+BRAKE_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "brake_tiers")
+GEARBOX_TECHNOLOGY_TREE = (
+    TechnologyNode(
+        "computer_optimised_gear_ratios",
+        "Computer-Optimised Gear Ratios",
+        "The Professional Era",
+        ("computer_optimised_spaceframe",),
+        35_000.0,
+        4,
+    ),
+)
 
 CHASSIS_TECHNOLOGY_BY_ID = {
     node.technology_id: node for node in CHASSIS_TECHNOLOGY_TREE
 }
 ENGINE_TECHNOLOGY_BY_ID = {
     node.technology_id: node for node in ENGINE_TECHNOLOGY_TREE
+}
+AERODYNAMICS_TECHNOLOGY_BY_ID = {
+    node.technology_id: node for node in AERODYNAMICS_TECHNOLOGY_TREE
+}
+TYRE_TECHNOLOGY_BY_ID = {node.technology_id: node for node in TYRE_TECHNOLOGY_TREE}
+BRAKE_TECHNOLOGY_BY_ID = {node.technology_id: node for node in BRAKE_TECHNOLOGY_TREE}
+GEARBOX_TECHNOLOGY_BY_ID = {
+    node.technology_id: node for node in GEARBOX_TECHNOLOGY_TREE
 }
 ERA_BY_NAME = {era.name: era for era in ERAS}
 ERA_ORDER = tuple(era.name for era in ERAS)
@@ -378,4 +454,35 @@ def available_engine_technologies(engine_researched, chassis_researched):
         for node in ENGINE_TECHNOLOGY_TREE
         if node.technology_id not in engine_researched
         and set(node.prerequisites).issubset(all_researched)
+    )
+
+
+def available_branch_technologies(tree, branch_researched, chassis_researched):
+    """Return branch technologies unlocked by their branch and chassis anchors."""
+    all_researched = set(branch_researched) | set(chassis_researched)
+    return tuple(
+        node
+        for node in tree
+        if node.technology_id not in branch_researched
+        and set(node.prerequisites).issubset(all_researched)
+    )
+
+
+def available_aerodynamics_technologies(aerodynamics_researched, chassis_researched):
+    return available_branch_technologies(
+        AERODYNAMICS_TECHNOLOGY_TREE,
+        aerodynamics_researched,
+        chassis_researched,
+    )
+
+
+def available_tyre_technologies(tyre_researched, chassis_researched):
+    return available_branch_technologies(
+        TYRE_TECHNOLOGY_TREE, tyre_researched, chassis_researched
+    )
+
+
+def available_brake_technologies(brake_researched, chassis_researched):
+    return available_branch_technologies(
+        BRAKE_TECHNOLOGY_TREE, brake_researched, chassis_researched
     )

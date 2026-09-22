@@ -5,8 +5,16 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from research import CHASSIS_TECHNOLOGY_BY_ID, ENGINE_TECHNOLOGY_BY_ID
+from research import (
+    AERODYNAMICS_TECHNOLOGY_BY_ID,
+    BRAKE_TECHNOLOGY_BY_ID,
+    CHASSIS_TECHNOLOGY_BY_ID,
+    ENGINE_TECHNOLOGY_BY_ID,
+    GEARBOX_TECHNOLOGY_BY_ID,
+    TYRE_TECHNOLOGY_BY_ID,
+)
 from sponsors import SPONSOR_BY_ID
+from diagnostics import reset_vehicle_log
 
 
 CAMPAIGN_FILE = Path(__file__).with_name("campaign_state.json")
@@ -36,6 +44,10 @@ class ResearchState:
 
     engine_technology: list[str] = field(default_factory=list)
     chassis_technology: list[str] = field(default_factory=list)
+    aerodynamics_technology: list[str] = field(default_factory=list)
+    tyre_technology: list[str] = field(default_factory=list)
+    brake_technology: list[str] = field(default_factory=list)
+    gearbox_technology: list[str] = field(default_factory=list)
 
     @property
     def engine_technology_level(self):
@@ -63,6 +75,42 @@ class ResearchState:
             raise ValueError(f"unknown chassis technology: {technology_id}")
         if technology_id not in self.chassis_technology:
             self.chassis_technology.append(technology_id)
+
+    def has_aerodynamics_technology(self, technology_id):
+        return technology_id in self.aerodynamics_technology
+
+    def add_aerodynamics_technology(self, technology_id):
+        if technology_id not in AERODYNAMICS_TECHNOLOGY_BY_ID:
+            raise ValueError(f"unknown aerodynamics technology: {technology_id}")
+        if technology_id not in self.aerodynamics_technology:
+            self.aerodynamics_technology.append(technology_id)
+
+    def has_tyre_technology(self, technology_id):
+        return technology_id in self.tyre_technology
+
+    def add_tyre_technology(self, technology_id):
+        if technology_id not in TYRE_TECHNOLOGY_BY_ID:
+            raise ValueError(f"unknown tyre technology: {technology_id}")
+        if technology_id not in self.tyre_technology:
+            self.tyre_technology.append(technology_id)
+
+    def has_brake_technology(self, technology_id):
+        return technology_id in self.brake_technology
+
+    def add_brake_technology(self, technology_id):
+        if technology_id not in BRAKE_TECHNOLOGY_BY_ID:
+            raise ValueError(f"unknown brake technology: {technology_id}")
+        if technology_id not in self.brake_technology:
+            self.brake_technology.append(technology_id)
+
+    def has_gearbox_technology(self, technology_id):
+        return technology_id in self.gearbox_technology
+
+    def add_gearbox_technology(self, technology_id):
+        if technology_id not in GEARBOX_TECHNOLOGY_BY_ID:
+            raise ValueError(f"unknown gearbox technology: {technology_id}")
+        if technology_id not in self.gearbox_technology:
+            self.gearbox_technology.append(technology_id)
 
 
 @dataclass
@@ -307,10 +355,70 @@ def research_chassis_technology(campaign, technology_id):
     campaign.research.add_chassis_technology(technology_id)
 
 
-def build_vehicle(campaign, garage_entry, cost_gbp):
+def _research_branch_technology(campaign, technology_id, tree_by_id, researched, add):
+    technology = tree_by_id.get(technology_id)
+    if technology is None:
+        raise ValueError(f"unknown technology: {technology_id}")
+    if technology_id in researched:
+        raise ValueError(f"{technology.name} has already been researched")
+    available_research = set(researched) | set(campaign.research.chassis_technology)
+    if not set(technology.prerequisites).issubset(available_research):
+        raise ValueError(f"chassis or branch prerequisites not met for {technology.name}")
+    if campaign.team.cash < technology.cost_gbp:
+        raise ValueError("insufficient funds for this research project")
+    if campaign.team.engineers < technology.engineers_required:
+        raise ValueError("not enough engineers available for this research project")
+
+    campaign.team.cash = round(campaign.team.cash - technology.cost_gbp, 2)
+    add(technology_id)
+
+
+def research_aerodynamics_technology(campaign, technology_id):
+    _research_branch_technology(
+        campaign,
+        technology_id,
+        AERODYNAMICS_TECHNOLOGY_BY_ID,
+        campaign.research.aerodynamics_technology,
+        campaign.research.add_aerodynamics_technology,
+    )
+
+
+def research_tyre_technology(campaign, technology_id):
+    _research_branch_technology(
+        campaign,
+        technology_id,
+        TYRE_TECHNOLOGY_BY_ID,
+        campaign.research.tyre_technology,
+        campaign.research.add_tyre_technology,
+    )
+
+
+def research_brake_technology(campaign, technology_id):
+    _research_branch_technology(
+        campaign,
+        technology_id,
+        BRAKE_TECHNOLOGY_BY_ID,
+        campaign.research.brake_technology,
+        campaign.research.add_brake_technology,
+    )
+
+
+def research_gearbox_technology(campaign, technology_id):
+    _research_branch_technology(
+        campaign,
+        technology_id,
+        GEARBOX_TECHNOLOGY_BY_ID,
+        campaign.research.gearbox_technology,
+        campaign.research.add_gearbox_technology,
+    )
+
+
+def build_vehicle(campaign, garage_entry, cost_gbp, vehicle=None):
     """Pay the construction cost and save a new vehicle to the garage."""
     if campaign.team.cash < cost_gbp:
         raise ValueError("insufficient funds to build this vehicle")
 
     campaign.team.cash = round(campaign.team.cash - cost_gbp, 2)
     campaign.garage.vehicles.append(garage_entry)
+    if vehicle is not None:
+        reset_vehicle_log(vehicle)

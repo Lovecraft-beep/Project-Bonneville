@@ -1,7 +1,5 @@
 # Project6 Bonneville
 
-import sys
-
 from simulation import run_simulation
 from cars import select_car
 from chassis import available_chassis
@@ -18,6 +16,7 @@ from management import (
     load_campaign,
     research_chassis_technology,
     research_engine_technology,
+    research_gearbox_technology,
     reset_campaign,
     save_campaign,
     sign_sponsor,
@@ -27,6 +26,7 @@ from management import (
     MECHANIC_HIRE_COST_GBP,
 )
 from records import create_record, display_records, load_records, save_record
+from diagnostics import append_run_log
 from research import (
     available_chassis_technologies,
     available_engine_technologies,
@@ -38,31 +38,10 @@ from research import (
 from reliability import resolve_run_failure
 from sponsors import available_sponsors
 from tracks import select_track
-from vehicle_designer import design_vehicle
+from gearbox import estimate_gear_limited_speed_mph, estimate_power_limited_speed_mph
+from vehicle_designer import change_vehicle_component, design_vehicle
 from encyclopedia import run_encyclopedia
 from historical_challenges import run_historical_challenges
-
-
-def launch_ui():
-    try:
-        from PySide6.QtGui import QGuiApplication
-        from PySide6.QtWidgets import QApplication
-        from ui.main_window import ProjectBonnevilleWindow
-    except Exception as exc:  # pragma: no cover - environment-specific setup failure
-        print(f"Unable to start PySide6: {exc}")
-        print("This environment appears to be headless or missing the Qt runtime.")
-        print("Run the app on a desktop machine, or use a GUI-enabled terminal session.")
-        return 1
-
-    if not QGuiApplication.platformName():
-        print("No desktop GUI platform is available for PySide6.")
-        print("This build requires a real desktop session, not a headless terminal.")
-        return 1
-
-    app = QApplication(sys.argv)
-    window = ProjectBonnevilleWindow()
-    window.show()
-    return app.exec()
 
 
 def print_status(campaign):
@@ -159,12 +138,67 @@ def print_run_summary(result):
     print(f"Measured Mile Speed: {result.measured_mile_speed_mph} mph")
 
 
-def action_test_run(campaign):
+def print_run_comparison(baseline, rerun):
+    """Print the performance change between two runs on the same track."""
+    comparisons = (
+        ("Measured mile speed", baseline.measured_mile_speed_mph, rerun.measured_mile_speed_mph, "mph"),
+        ("Peak speed", baseline.peak_speed_mph, rerun.peak_speed_mph, "mph"),
+        ("Measured mile time", baseline.measured_mile_time_seconds, rerun.measured_mile_time_seconds, "s"),
+        ("Average acceleration", baseline.average_acceleration_g, rerun.average_acceleration_g, "G"),
+        ("Average deceleration", baseline.average_deceleration_g, rerun.average_deceleration_g, "G"),
+        ("Maximum brake temperature", baseline.maximum_brake_temperature_c, rerun.maximum_brake_temperature_c, "C"),
+        ("Gear changes", baseline.gear_change_count, rerun.gear_change_count, ""),
+        ("Wheelspin events", baseline.wheelspin_event_count, rerun.wheelspin_event_count, ""),
+    )
+    print("\n=== TEST RUN COMPARISON ===")
+    print(f"{'Metric':<28} {'Before':>12} {'After':>12} {'Change':>12}")
+    print("-" * 68)
+    for label, before, after, unit in comparisons:
+        change = after - before
+        print(
+            f"{label:<28} {before:>9.1f} {unit:<3} {after:>9.1f} {unit:<3} "
+            f"{change:>+9.1f} {unit}"
+        )
+
+
+def print_gearbox_warning(vehicle):
+    """Warn when the highest gear is likely to cap the engine's speed."""
+    power_speed = estimate_power_limited_speed_mph(vehicle, vehicle.engine)
+    gear_speed = estimate_gear_limited_speed_mph(vehicle)
+    if gear_speed < power_speed * 0.95:
+        print(
+            f"WARNING: current gearing may limit this engine to approximately "
+            f"{gear_speed:.1f} mph; estimated power potential is {power_speed:.1f} mph."
+        )
+
+
+def offer_component_rerun(campaign, vehicle, track, result):
+    """Offer a same-track rerun with one changed vehicle component."""
+    change_choice = input(
+        "Change a component and run this vehicle again? (yes/no): "
+    ).strip().lower()
+    if change_choice == "yes" and change_vehicle_component(
+        vehicle,
+        campaign,
+        allow_gearbox_optimization=campaign.research.has_gearbox_technology(
+            "computer_optimised_gear_ratios"
+        ),
+    ):
+        action_test_run(
+            campaign,
+            vehicle=vehicle,
+            track=track,
+            comparison_result=result,
+        )
+
+
+def action_test_run(campaign, vehicle=None, track=None, comparison_result=None):
     """Run the test-run turn action: select a car and track, then simulate."""
-    vehicle = select_car(campaign)
-    track = select_track()
+    vehicle = vehicle or select_car(campaign)
+    track = track or select_track()
     run_cost = calculate_run_cost(vehicle, track)
     vehicle.display()
+    print_gearbox_warning(vehicle)
     print(f"Track: {track.name}")
     print(f"Altitude: {track.altitude_m} m")
     print(f"Temperature: {track.temperature_c} C")
@@ -190,9 +224,10 @@ def action_test_run(campaign):
         track_friction_factor=track.friction_factor,
         air_density_kg_m3=track.air_density_kg_m3,
     )
-
     print_run_telemetry(result)
     print_run_summary(result)
+    if comparison_result is not None:
+        print_run_comparison(comparison_result, result)
 
     outcome = resolve_run_failure(
         vehicle.engine,
@@ -202,6 +237,7 @@ def action_test_run(campaign):
         brake_fade=any(sample.brake_fade for sample in result.telemetry),
         sponsor_reliability_bonus=campaign.sponsorship.reliability_bonus,
     )
+    append_run_log(vehicle, track, result, outcome=outcome)
     print(f"Failure probability: {outcome.failure_probability:.1%}")
     if outcome.failed:
         print(f"Aborted run: {outcome.failure_type.name}.")
@@ -217,6 +253,7 @@ def action_test_run(campaign):
             f"Next turn: {campaign.turn_number} | "
             f"{campaign.current_year} season"
         )
+        offer_component_rerun(campaign, vehicle, track, result)
         return
 
     complete_run(campaign, run_cost, result.measured_mile_speed_mph)
@@ -231,6 +268,8 @@ def action_test_run(campaign):
     record = create_record(vehicle, track, result, campaign)
     save_record(record)
     display_records(load_records(), campaign.campaign_id)
+
+    offer_component_rerun(campaign, vehicle, track, result)
 
 
 def action_research_engines(campaign):
@@ -316,6 +355,22 @@ def action_research_chassis(campaign):
         f"Next turn: {campaign.turn_number} | "
         f"{campaign.current_year} season"
     )
+
+
+def action_research_gearbox(campaign):
+    """Research computer-optimised gear ratios."""
+    technology_id = "computer_optimised_gear_ratios"
+    if campaign.research.has_gearbox_technology(technology_id):
+        print("Computer-Optimised Gear Ratios are already researched.")
+        return
+    try:
+        research_gearbox_technology(campaign, technology_id)
+    except ValueError as exc:
+        print(f"Unable to research gearbox technology: {exc}")
+        return
+    advance_turn(campaign)
+    save_campaign(campaign)
+    print("Researched Computer-Optimised Gear Ratios.")
 
 
 def action_hire_engineer(campaign):
@@ -444,7 +499,7 @@ def action_design_vehicle(campaign):
         return
 
     try:
-        build_vehicle(campaign, garage_entry, cost_gbp)
+        build_vehicle(campaign, garage_entry, cost_gbp, vehicle=vehicle)
     except ValueError as exc:
         print(f"Unable to build {garage_entry.vehicle_name}: {exc}")
         return
@@ -463,6 +518,7 @@ MENU_ACTIONS = {
     "2": ("Design Vehicle", action_design_vehicle),
     "3": ("Research Engine Technology", action_research_engines),
     "4": ("Research Chassis Technology", action_research_chassis),
+    "10": ("Research Gearbox Technology", action_research_gearbox),
     "5": ("Hire Engineer", action_hire_engineer),
     "6": ("Hire Mechanic", action_hire_mechanic),
     "7": ("Upgrade Workshop", action_upgrade_workshop),
@@ -480,10 +536,10 @@ def run_career_mode():
         print("\nWhat would you like to do?")
         for key, (label, _) in MENU_ACTIONS.items():
             print(f"{key}. {label}")
-        print("10. Back to Main Menu")
+        print("11. Back to Main Menu")
 
         choice = input("Choose an action: ").strip()
-        if choice == "10":
+        if choice == "11":
             break
 
         action = MENU_ACTIONS.get(choice)
@@ -511,7 +567,39 @@ def _create_sandbox_campaign():
     campaign.research.engine_technology = [
         node.technology_id for node in ENGINE_TECHNOLOGY_TREE
     ]
+    campaign.research.gearbox_technology = ["computer_optimised_gear_ratios"]
     return campaign
+
+
+def run_facility_vehicle_test(campaign, vehicle, track):
+    """Test a vehicle repeatedly on one track while comparing redesigns."""
+    previous_result = None
+    while True:
+        vehicle.display()
+        print_gearbox_warning(vehicle)
+        print(f"Track: {track.name}")
+        print("\nRunning simulation...")
+        result = run_simulation(
+            vehicle,
+            track_miles=track.length_miles,
+            measured_mile_start=track.measured_mile_start,
+            track_friction_factor=track.friction_factor,
+            air_density_kg_m3=track.air_density_kg_m3,
+        )
+        append_run_log(vehicle, track, result)
+        print_run_telemetry(result)
+        print_run_summary(result)
+        if previous_result is not None:
+            print_run_comparison(previous_result, result)
+
+        redesign = input(
+            "Redesign a component and rerun this vehicle? (yes/no): "
+        ).strip().lower()
+        if redesign != "yes" or not change_vehicle_component(
+            vehicle, campaign, allow_gearbox_optimization=True
+        ):
+            break
+        previous_result = result
 
 
 def run_engineering_test_facility():
@@ -536,23 +624,12 @@ def run_engineering_test_facility():
             vehicle, cost_gbp, garage_entry = design_vehicle(campaign)
             if vehicle is None:
                 continue
-            build_vehicle(campaign, garage_entry, cost_gbp)
+            build_vehicle(campaign, garage_entry, cost_gbp, vehicle=vehicle)
             print(f"Built {garage_entry.vehicle_name}.")
         elif choice == "2":
             vehicle = select_car(campaign)
             track = select_track()
-            vehicle.display()
-            print(f"Track: {track.name}")
-            print("\nRunning simulation...")
-            result = run_simulation(
-                vehicle,
-                track_miles=track.length_miles,
-                measured_mile_start=track.measured_mile_start,
-                track_friction_factor=track.friction_factor,
-                air_density_kg_m3=track.air_density_kg_m3,
-            )
-            print_run_telemetry(result)
-            print_run_summary(result)
+            run_facility_vehicle_test(campaign, vehicle, track)
         else:
             print("Invalid choice.")
 
@@ -584,6 +661,4 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--ui":
-        raise SystemExit(launch_ui())
     main()

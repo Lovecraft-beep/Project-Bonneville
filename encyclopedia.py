@@ -4,7 +4,14 @@ from brakes import BRAKE_CATALOG
 from cars import AVAILABLE_CARS
 from engines import ALL_ENGINES
 from gearbox import PREBUILT_GEARBOXES, TRANSMISSION_CATALOG
-from research import CHASSIS_TECHNOLOGY_TREE, ENGINE_TECHNOLOGY_TREE, ERAS
+from research import (
+    AERODYNAMICS_TECHNOLOGY_TREE,
+    BRAKE_TECHNOLOGY_TREE,
+    CHASSIS_TECHNOLOGY_TREE,
+    ENGINE_TECHNOLOGY_TREE,
+    ERAS,
+    TYRE_TECHNOLOGY_TREE,
+)
 from tracks import AVAILABLE_TRACKS
 
 
@@ -70,8 +77,16 @@ def print_technologies():
         engine_types = [
             node.name for node in ENGINE_TECHNOLOGY_TREE if node.era == era.name
         ]
+        aerodynamics = [
+            node.name for node in AERODYNAMICS_TECHNOLOGY_TREE if node.era == era.name
+        ]
+        tyres = [node.name for node in TYRE_TECHNOLOGY_TREE if node.era == era.name]
+        brakes = [node.name for node in BRAKE_TECHNOLOGY_TREE if node.era == era.name]
         print("  Chassis tiers: " + ", ".join(chassis_tiers))
         print("  Engine types: " + ", ".join(engine_types))
+        print("  Aerodynamics: " + ", ".join(aerodynamics))
+        print("  Tyres: " + ", ".join(tyres))
+        print("  Brakes: " + ", ".join(brakes))
 
 
 ENCYCLOPEDIA_SECTIONS = {

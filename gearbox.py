@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from math import pi
 
 
+HORSEPOWER_IN_WATTS = 745.7
+METRES_PER_MILE = 1609.344
+
+
 @dataclass
 class Gearbox:
     name: str
@@ -109,6 +113,72 @@ class Gearbox:
             self.current_gear = self.pending_gear
             self.pending_gear = None
             self.shift_elapsed = 0.0
+
+
+def estimate_power_limited_speed_mph(vehicle, engine):
+    """Estimate the speed where engine power balances drag and rolling loss."""
+    power_watts = engine.power_hp * HORSEPOWER_IN_WATTS * 0.85
+    rolling_force = vehicle.mass * 9.81 * 0.015
+    low_speed = 0.1
+    high_speed = 150.0
+    for _ in range(60):
+        speed_mps = (low_speed + high_speed) / 2
+        drag_force = 0.5 * vehicle.cd * 1.2 * speed_mps**2 * vehicle.area
+        required_power = (drag_force + rolling_force) * speed_mps
+        if required_power < power_watts:
+            low_speed = speed_mps
+        else:
+            high_speed = speed_mps
+    speed_mps = (low_speed + high_speed) / 2
+    return speed_mps * 2.23694
+
+
+def estimate_gear_limited_speed_mph(vehicle):
+    """Estimate top speed at 98% of engine redline in the highest gear."""
+    gearbox = vehicle.gearbox
+    rpm = vehicle.engine.max_rpm * 0.98
+    wheel_revolutions_per_second = (
+        rpm / 60 / (gearbox.gears[-1] * gearbox.final_drive_ratio)
+    )
+    speed_mps = wheel_revolutions_per_second * 2 * pi * vehicle.wheel_radius_m
+    return speed_mps * 2.23694
+
+
+def optimize_gearbox_for_engine(vehicle):
+    """Update gearbox ratios to suit the engine's power and usable RPM range."""
+    gearbox = vehicle.gearbox
+    if vehicle.engine.torque_curve_type in ("turbojet", "rocket"):
+        gearbox.gears = (1.0,)
+        gearbox.final_drive = 2.25
+        return gearbox
+
+    target_speed_mph = estimate_power_limited_speed_mph(vehicle, vehicle.engine)
+    target_speed_mps = target_speed_mph / 2.23694
+    usable_rpm = vehicle.engine.max_rpm * 0.98
+    wheel_revolutions_per_second = target_speed_mps / (2 * pi * vehicle.wheel_radius_m)
+    target_overall_ratio = (
+        usable_rpm / (wheel_revolutions_per_second * 60)
+    )
+    gear_count = max(1, gearbox.gear_count)
+    final_drive = min(3.5, max(0.62, target_overall_ratio / 2.5))
+    top_ratio = target_overall_ratio / final_drive
+    first_ratio = min(4.5, max(top_ratio, top_ratio * (1.8 if gear_count > 1 else 1.0)))
+    if gear_count == 1:
+        ratios = (round(top_ratio, 3),)
+    else:
+        ratios = tuple(
+            round(
+                top_ratio
+                + (first_ratio - top_ratio)
+                * (gear_count - index - 1)
+                / (gear_count - 1),
+                3,
+            )
+            for index in range(gear_count)
+        )
+    gearbox.gears = ratios
+    gearbox.final_drive = round(final_drive, 3)
+    return gearbox
 
 
 BLUE_BIRD_GEARBOX = Gearbox(
@@ -325,7 +395,7 @@ def recommended_transmission(engine):
     return FIVE_SPEED_TRANSMISSION
 
 
-def select_gearbox(engine=None):
+def select_gearbox(engine=None, current_gearbox=None):
     if engine is not None and engine.torque_curve_type in ("turbojet", "rocket"):
         print(
             "\n=== SELECT GEARBOX ===\n"
@@ -336,8 +406,9 @@ def select_gearbox(engine=None):
 
     print("\n=== SELECT GEARBOX ===")
     for number, gearbox in enumerate(TRANSMISSION_CATALOG, start=1):
+        marker = "* " if current_gearbox and gearbox.name == current_gearbox.name else "  "
         print(
-            f"{number}. {gearbox.name} ({gearbox.gear_count} gears, "
+            f"{number}. {marker}{gearbox.name} ({gearbox.gear_count} gears, "
             f"GBP {gearbox.cost_gbp:,.0f}, {gearbox.efficiency:.0%} efficiency)"
         )
 

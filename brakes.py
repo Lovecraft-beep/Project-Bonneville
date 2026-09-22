@@ -77,15 +77,55 @@ SERVO_ASSISTED_DRUM_BRAKES = BrakeSystem(
 )
 
 
-BRAKE_CATALOG = (DRUM_BRAKES_1920S, SERVO_ASSISTED_DRUM_BRAKES)
+HYDRAULIC_DISC_BRAKES = BrakeSystem(
+    name="Hydraulic disc brakes",
+    max_braking_g=0.70,
+    efficiency=0.80,
+    cost_gbp=8_000.0,
+    fade_start_temperature_c=350.0,
+    fade_end_temperature_c=650.0,
+    cooling_rate_w_per_c=150.0,
+)
+
+
+AIR_BRAKES = BrakeSystem(
+    name="High-speed air brakes",
+    max_braking_g=0.85,
+    efficiency=0.84,
+    cost_gbp=15_000.0,
+    fade_start_temperature_c=400.0,
+    fade_end_temperature_c=750.0,
+    cooling_rate_w_per_c=180.0,
+)
+
+
+CARBON_BRAKES = BrakeSystem(
+    name="Carbon-carbon brakes",
+    max_braking_g=1.10,
+    efficiency=0.92,
+    cost_gbp=35_000.0,
+    fade_start_temperature_c=650.0,
+    fade_end_temperature_c=1_000.0,
+    cooling_rate_w_per_c=220.0,
+)
+
+
+BRAKE_CATALOG = (
+    DRUM_BRAKES_1920S,
+    SERVO_ASSISTED_DRUM_BRAKES,
+    HYDRAULIC_DISC_BRAKES,
+    AIR_BRAKES,
+    CARBON_BRAKES,
+)
 BRAKE_BY_NAME = {brakes.name: brakes for brakes in BRAKE_CATALOG}
 
 
-def select_brakes():
+def select_brakes(current_brakes=None):
     print("\n=== SELECT BRAKES ===")
     for number, brakes in enumerate(BRAKE_CATALOG, start=1):
+        marker = "* " if current_brakes and brakes.name == current_brakes.name else "  "
         print(
-            f"{number}. {brakes.name} (GBP {brakes.cost_gbp:,.0f}, "
+            f"{number}. {marker}{brakes.name} (GBP {brakes.cost_gbp:,.0f}, "
             f"{brakes.efficiency:.0%} efficiency, {brakes.max_braking_g}g max)"
         )
 
