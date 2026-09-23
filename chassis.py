@@ -126,7 +126,10 @@ def select_chassis(researched_technologies=()):
     print("\n=== SELECT CHASSIS ===")
     chassis_choices = available_chassis(researched_technologies)
     for number, chassis in enumerate(chassis_choices, start=1):
-        print(f"{number}. {chassis.name} (GBP {chassis.cost_gbp:,.0f})")
+        print(
+            f"{number}. {chassis.name} ({chassis.mass_kg:,.0f} kg, "
+            f"GBP {chassis.cost_gbp:,.0f})"
+        )
         print(f"   {chassis.description}")
 
     choice = input("Choose a chassis: ").strip()

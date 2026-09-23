@@ -6,6 +6,17 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from diagnostics import reset_vehicle_log
+from campaign_world import (
+    RivalState,
+    WorldState,
+    advance_world,
+    create_world_state,
+)
+from historical_records import (
+    next_historical_target,
+    record_ids_achieved_by_speed,
+    target_completed,
+)
 from research import (
     AERODYNAMICS_TECHNOLOGY_BY_ID,
     BRAKE_TECHNOLOGY_BY_ID,
@@ -168,10 +179,13 @@ class CampaignState:
     garage: Garage = field(default_factory=Garage)
     campaign_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     current_year: int = STARTING_YEAR
+    current_day_of_year: int = 1
     turn_number: int = 1
     completed_runs: int = 0
     failed_runs: int = 0
     best_measured_mile_speed_mph: float = 0.0
+    completed_historical_record_ids: list[str] = field(default_factory=list)
+    world: WorldState = field(default_factory=create_world_state)
 
     @property
     def funds_gbp(self):
@@ -210,6 +224,19 @@ def load_campaign(path=CAMPAIGN_FILE):
                 GarageVehicle(**vehicle) for vehicle in garage_data.get("vehicles", [])
             ]
         )
+        data.setdefault(
+            "completed_historical_record_ids",
+            record_ids_achieved_by_speed(data.get("best_measured_mile_speed_mph", 0.0)),
+        )
+        world_data = data.get("world", {})
+        data["world"] = WorldState(
+            rivals=[RivalState(**rival) for rival in world_data.get("rivals", [])]
+            or create_world_state().rivals,
+            headlines=world_data.get("headlines", [])
+            or create_world_state().headlines,
+            reactions=world_data.get("reactions", []),
+            historical_events_seen=world_data.get("historical_events_seen", []),
+        )
         return CampaignState(**data)
 
     # Migrate campaign files written before Team became the owner of cash.
@@ -224,7 +251,9 @@ def save_campaign(campaign, path=CAMPAIGN_FILE):
         campaign_file.write("\n")
 
 
-def complete_run(campaign, run_cost_gbp, measured_mile_speed_mph):
+def complete_run(
+    campaign, run_cost_gbp, measured_mile_speed_mph, is_record_attempt=False
+):
     """Charge a completed run and update campaign performance."""
     if run_cost_gbp > campaign.funds_gbp:
         raise ValueError("campaign does not have enough funds for this run")
@@ -239,6 +268,12 @@ def complete_run(campaign, run_cost_gbp, measured_mile_speed_mph):
     campaign.team.reputation = round(
         campaign.team.reputation + (2.0 if is_new_record else 1.0), 2
     )
+    if is_record_attempt:
+        target = next_historical_target(
+            campaign.current_year, campaign.completed_historical_record_ids
+        )
+        if target and target_completed(target, measured_mile_speed_mph):
+            campaign.completed_historical_record_ids.append(target.record_id)
 
 
 def complete_failed_run(campaign, run_cost_gbp):
@@ -250,13 +285,18 @@ def complete_failed_run(campaign, run_cost_gbp):
     campaign.failed_runs += 1
 
 
-def advance_turn(campaign):
-    """Move the campaign to the next annual planning turn."""
+def advance_turn(campaign, days=365):
+    """Advance campaign time and update the world when a year changes."""
+    previous_year = campaign.current_year
     campaign.team.cash = round(
         campaign.team.cash + campaign.sponsorship.income_per_turn_gbp, 2
     )
     campaign.turn_number += 1
-    campaign.current_year += 1
+    elapsed_days = campaign.current_day_of_year - 1 + days
+    campaign.current_year += elapsed_days // 365
+    campaign.current_day_of_year = elapsed_days % 365 + 1
+    if campaign.current_year != previous_year:
+        advance_world(campaign)
 
 
 def sign_sponsor(campaign, sponsor_id):

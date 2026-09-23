@@ -1,4 +1,7 @@
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 campaign_state.json
 historical_records.json
+test_vehicle_diagnostics.log

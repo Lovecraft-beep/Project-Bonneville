@@ -92,6 +92,22 @@ class Engine:
 # A curated set of genuinely significant historical (and near-future) land
 # speed record engines, spanning the full chassis/engine tech tree rather
 # than every incremental production variant of each family.
+PIONEER_SINGLE_CYLINDER = Engine(
+    name="Pioneer Single-Cylinder",
+    cylinders=1,
+    power_hp=24.0,
+    torque_nm=220.0,
+    max_rpm=1_800,
+    mass_kg=95.0,
+    reliability=0.45,
+    configuration="open single-cylinder petrol engine",
+    era="1895",
+    base_cost_gbp=500,
+    rarity_factor=0.8,
+    torque_curve_type="early_piston",
+)
+
+
 WELCH_HEMI = Engine(
     name="Welch Hemi",
     cylinders=4,
@@ -265,6 +281,7 @@ EJ200_TURBOFAN = Engine(
 
 
 ALL_ENGINES = (
+    PIONEER_SINGLE_CYLINDER,
     WELCH_HEMI,
     STANLEY_STEAM_ENGINE,
     DARRACQ_V8_25_LITRE,
@@ -308,7 +325,8 @@ def select_engine(researched_technologies=(), current_engine=None):
         marker = "* " if current_engine and engine.name == current_engine.name else "  "
         print(
             f"{number}. {marker}{engine.name} ({engine.power_hp} hp, "
-            f"GBP {engine.purchase_cost_gbp:,}, reliability {engine.reliability:.0%})"
+            f"{engine.mass_kg:,.0f} kg, GBP {engine.purchase_cost_gbp:,}, "
+            f"reliability {engine.reliability:.0%})"
         )
 
     choice = input("Choose an engine: ").strip()

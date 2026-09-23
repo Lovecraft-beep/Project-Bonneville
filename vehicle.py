@@ -18,10 +18,12 @@ class Vehicle:
         length_m=None,
         height_m=None,
         wheelbase_m=None,
+        component_mass_enabled=False,
     ):
         self.name = name  # Name of the vehicle
         self.model_year = model_year
-        self.mass = mass  # Mass of the vehicle in kg
+        self.chassis_mass_kg = mass
+        self.component_mass_enabled = component_mass_enabled
         self.length_m = length_m
         self.height_m = height_m
         self.wheelbase_m = wheelbase_m
@@ -36,6 +38,25 @@ class Vehicle:
         self.wheel_radius_m = wheel_radius_m
         self.gearbox = gearbox or Gearbox(name="Standard Gearbox", gears=(3.0,))
         self.brakes = brakes
+        self._initial_component_mass_kg = self._component_mass_kg
+
+    @property
+    def _component_mass_kg(self):
+        return (
+            self.engine.mass_kg
+            + self.gearbox.mass_kg
+            + (self.brakes.mass_kg if self.brakes else 0.0)
+        )
+
+    @property
+    def mass(self):
+        if not self.component_mass_enabled:
+            return (
+                self.chassis_mass_kg
+                + self._component_mass_kg
+                - self._initial_component_mass_kg
+            )
+        return self.chassis_mass_kg + self._component_mass_kg
 
     def display(self):
         print("\n=== VEHICLE ===")
@@ -49,6 +70,9 @@ class Vehicle:
             print(f"Engine Max RPM: {self.engine.max_rpm}")
             print(f"Torque Curve: {self.engine.torque_curve_type}")
         print(f"Mass: {self.mass} kg")
+        if self.component_mass_enabled:
+            print(f"Chassis Mass: {self.chassis_mass_kg} kg")
+            print(f"Engine Mass: {self.engine.mass_kg} kg")
         if self.length_m:
             print(f"Length: {self.length_m} m")
         if self.height_m:
@@ -68,4 +92,6 @@ class Vehicle:
         print(f"Gearbox Reliability: {self.gearbox.reliability}")
         if self.brakes:
             print(f"Brakes: {self.brakes.name}")
+            if self.component_mass_enabled:
+                print(f"Brake Mass: {self.brakes.mass_kg} kg")
             print(f"Brake Efficiency: {self.brakes.efficiency}")

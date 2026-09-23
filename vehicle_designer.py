@@ -22,7 +22,7 @@ def design_vehicle(campaign):
     chassis = select_chassis(campaign.research.chassis_technology)
     engine = select_engine(campaign.research.engine_technology)
     gearbox = select_gearbox(engine)
-    brakes = select_brakes()
+    brakes = select_brakes(current_year=campaign.current_year)
 
     vehicle = Vehicle(
         name=name,
@@ -34,6 +34,7 @@ def design_vehicle(campaign):
         wheel_radius_m=chassis.wheel_radius_m,
         gearbox=gearbox,
         brakes=brakes,
+        component_mass_enabled=True,
     )
 
     cost_gbp = round(
@@ -88,7 +89,10 @@ def change_vehicle_component(vehicle, campaign, allow_gearbox_optimization=False
             current_gearbox=vehicle.gearbox,
         )
     elif choice == "3":
-        vehicle.brakes = select_brakes(current_brakes=vehicle.brakes)
+        vehicle.brakes = select_brakes(
+            current_brakes=vehicle.brakes,
+            current_year=campaign.current_year,
+        )
     elif choice == "4" and allow_gearbox_optimization:
         optimize_gearbox_for_engine(vehicle)
         print(
@@ -121,4 +125,5 @@ def build_vehicle_from_garage_entry(entry):
         wheel_radius_m=chassis.wheel_radius_m,
         gearbox=gearbox,
         brakes=brakes,
+        component_mass_enabled=True,
     )

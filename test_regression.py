@@ -12,15 +12,20 @@ from pathlib import Path
 from unittest.mock import patch
 
 import records
+from brakes import BRAKE_BY_NAME
+from brakes import available_brakes
 from cars import AVAILABLE_CARS
 from chassis import CHASSIS_BY_ID
 from encyclopedia import ENCYCLOPEDIA_SECTIONS
-from engines import ALL_ENGINES
+from engines import ALL_ENGINES, PIONEER_SINGLE_CYLINDER
 from gearbox import PREBUILT_GEARBOXES, TRANSMISSION_CATALOG
 from historical_challenges import CHALLENGES
+from historical_records import HISTORICAL_TARGETS, next_historical_target
 from management import (
     CampaignState,
+    advance_turn,
     build_vehicle,
+    complete_run,
     hire_engineer,
     load_campaign,
     research_chassis_technology,
@@ -36,7 +41,7 @@ from research import (
 )
 from simulation import run_simulation
 from sponsors import SPONSOR_CATALOG
-from tracks import BONNEVILLE_SALT_FLATS
+from tracks import BONNEVILLE_SALT_FLATS, available_tracks
 from vehicle_designer import build_vehicle_from_garage_entry, design_vehicle
 
 # A measured-mile speed above this is a sign of a bug (e.g. the "measured
@@ -91,6 +96,43 @@ class HistoricalChallengeRegressionTests(unittest.TestCase):
                 result.measured_mile_speed_mph, IMPLAUSIBLE_SPEED_MPH, challenge.name
             )
 
+    def test_major_record_dataset_is_sequentially_available(self):
+        self.assertEqual(len(HISTORICAL_TARGETS), 40)
+        first_target = next_historical_target(1895, [])
+        self.assertEqual(first_target.record_id, "jeantaud_1898")
+        next_target = next_historical_target(1898, [first_target.record_id])
+        self.assertEqual(next_target.record_id, "jenatzy_dogcart_1899")
+
+    def test_campaign_run_completes_current_historical_target(self):
+        campaign = CampaignState(current_year=1898)
+        complete_run(
+            campaign,
+            0.0,
+            HISTORICAL_TARGETS[0].speed_mph,
+            is_record_attempt=True,
+        )
+        self.assertEqual(
+            campaign.completed_historical_record_ids,
+            ["jeantaud_1898"],
+        )
+
+    def test_early_campaign_catalogs_reflect_historical_limits(self):
+        self.assertEqual(
+            [track.name for track in available_tracks(1895).values()],
+            ["Public Roads"],
+        )
+        self.assertEqual(
+            [brake.name for brake in available_brakes(1895)],
+            ["Wooden block brakes"],
+        )
+        self.assertEqual(PIONEER_SINGLE_CYLINDER.power_hp, 24.0)
+        self.assertLess(PIONEER_SINGLE_CYLINDER.reliability, 0.5)
+
+    def test_test_run_does_not_complete_historical_target(self):
+        campaign = CampaignState(current_year=1898)
+        complete_run(campaign, 0.0, HISTORICAL_TARGETS[0].speed_mph)
+        self.assertEqual(campaign.completed_historical_record_ids, [])
+
 
 class EncyclopediaRegressionTests(unittest.TestCase):
     def test_all_sections_print_without_crashing(self):
@@ -99,6 +141,27 @@ class EncyclopediaRegressionTests(unittest.TestCase):
 
 
 class CampaignProgressionRegressionTests(unittest.TestCase):
+    def test_runs_advance_days_without_moving_to_next_year(self):
+        campaign = CampaignState(current_year=1895)
+        advance_turn(campaign, days=7)
+        self.assertEqual(campaign.current_year, 1895)
+        self.assertEqual(campaign.current_day_of_year, 8)
+
+    def test_planning_turn_rolls_year_and_updates_world(self):
+        campaign = CampaignState(current_year=1926, current_day_of_year=360)
+        advance_turn(campaign)
+        self.assertEqual(campaign.current_year, 1927)
+        self.assertEqual(campaign.current_day_of_year, 360)
+        self.assertTrue(campaign.world.reactions)
+
+    def test_world_progression_creates_events_rivals_and_reactions(self):
+        campaign = CampaignState(current_year=1926)
+        campaign.best_measured_mile_speed_mph = 180.0
+        advance_turn(campaign)
+        self.assertTrue(campaign.world.headlines)
+        self.assertTrue(campaign.world.reactions)
+        self.assertTrue(any(rival.best_speed_mph > 0 for rival in campaign.world.rivals))
+
     def test_full_research_tree_and_vehicle_build(self):
         campaign = CampaignState()
         campaign.team.cash = 10_000_000.0
@@ -123,6 +186,32 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
 
         rebuilt = build_vehicle_from_garage_entry(garage_entry)
         self.assertEqual(rebuilt.name, "Regression Car")
+        chassis = CHASSIS_BY_ID[garage_entry.chassis_id]
+        expected_mass = (
+            chassis.mass_kg
+            + rebuilt.engine.mass_kg
+            + rebuilt.gearbox.mass_kg
+            + BRAKE_BY_NAME[garage_entry.brakes_name].mass_kg
+        )
+        self.assertEqual(vehicle.mass, expected_mass)
+        self.assertEqual(rebuilt.mass, expected_mass)
+
+        replacement_engine = ALL_ENGINES[1]
+        rebuilt.engine = replacement_engine
+        self.assertEqual(
+            rebuilt.mass,
+            expected_mass - vehicle.engine.mass_kg + replacement_engine.mass_kg,
+        )
+
+        mass_before_gearbox_change = rebuilt.mass
+        replacement_gearbox = TRANSMISSION_CATALOG[1]
+        rebuilt.gearbox = replacement_gearbox
+        self.assertEqual(
+            rebuilt.mass,
+            mass_before_gearbox_change
+            - vehicle.gearbox.mass_kg
+            + replacement_gearbox.mass_kg,
+        )
 
     def test_sponsorship_signing_and_duplicate_rejection(self):
         campaign = CampaignState()
@@ -144,6 +233,7 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
             loaded = load_campaign(path)
             self.assertEqual(loaded.team.engineers, campaign.team.engineers)
             self.assertEqual(loaded.campaign_id, campaign.campaign_id)
+            self.assertEqual(len(loaded.world.rivals), len(campaign.world.rivals))
 
     def test_reset_campaign_clears_saved_state(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

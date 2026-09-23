@@ -15,6 +15,7 @@ class Track:
     distance_from_midlands_miles: float = 0.0
     base_entry_cost_gbp: float = 0.0
     transport_cost_per_mile_gbp: float = 0.0
+    introduced_year: int = 1895
 
     @property
     def event_cost_gbp(self):
@@ -35,6 +36,7 @@ BONNEVILLE_SALT_FLATS = Track(
     distance_from_midlands_miles=4_300.0,
     base_entry_cost_gbp=2_500.0,
     transport_cost_per_mile_gbp=2.0,
+    introduced_year=1935,
 )
 
 
@@ -49,6 +51,7 @@ BROOKLANDS = Track(
     distance_from_midlands_miles=25.0,
     base_entry_cost_gbp=250.0,
     transport_cost_per_mile_gbp=2.0,
+    introduced_year=1907,
 )
 
 
@@ -63,6 +66,7 @@ PENDINE_SANDS = Track(
     distance_from_midlands_miles=250.0,
     base_entry_cost_gbp=500.0,
     transport_cost_per_mile_gbp=2.0,
+    introduced_year=1900,
 )
 
 
@@ -77,6 +81,7 @@ DAYTONA_BEACH = Track(
     distance_from_midlands_miles=4_200.0,
     base_entry_cost_gbp=1_500.0,
     transport_cost_per_mile_gbp=2.0,
+    introduced_year=1902,
 )
 
 
@@ -91,6 +96,7 @@ BLACK_ROCK_DESERT = Track(
     distance_from_midlands_miles=4_600.0,
     base_entry_cost_gbp=1_800.0,
     transport_cost_per_mile_gbp=2.0,
+    introduced_year=1970,
 )
 
 
@@ -105,6 +111,7 @@ DONCASTER_TEST_TRACK = Track(
     distance_from_midlands_miles=150.0,
     base_entry_cost_gbp=300.0,
     transport_cost_per_mile_gbp=2.0,
+    introduced_year=1950,
 )
 
 
@@ -119,6 +126,7 @@ PUBLIC_ROADS = Track(
     distance_from_midlands_miles=50.0,
     base_entry_cost_gbp=100.0,
     transport_cost_per_mile_gbp=2.0,
+    introduced_year=1895,
 )
 
 
@@ -133,13 +141,25 @@ AVAILABLE_TRACKS = {
 }
 
 
-def select_track():
+def available_tracks(current_year=None):
+    """Return tracks historically available in the campaign year."""
+    if current_year is None:
+        return AVAILABLE_TRACKS
+    return {
+        choice: track
+        for choice, track in AVAILABLE_TRACKS.items()
+        if track.introduced_year <= current_year
+    }
+
+
+def select_track(current_year=None):
     print("\n=== SELECT TRACK ===")
-    for choice, track in AVAILABLE_TRACKS.items():
+    track_choices = available_tracks(current_year)
+    for choice, track in track_choices.items():
         print(f"{choice}. {track.name}")
 
     choice = input("Choose a track: ").strip()
-    if choice not in AVAILABLE_TRACKS:
-        print("Invalid choice. Using Bonneville Salt Flats.")
-        choice = "1"
-    return AVAILABLE_TRACKS[choice]
+    if choice not in track_choices:
+        choice = next(iter(track_choices))
+        print(f"Invalid choice. Using {track_choices[choice].name}.")
+    return track_choices[choice]

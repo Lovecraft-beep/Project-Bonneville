@@ -415,7 +415,8 @@ def select_gearbox(engine=None, current_gearbox=None):
         )
         print(
             f"{number}. {marker}{gearbox.name} ({gearbox.gear_count} gears, "
-            f"GBP {gearbox.cost_gbp:,.0f}, {gearbox.efficiency:.0%} efficiency)"
+            f"{gearbox.mass_kg:,.0f} kg, GBP {gearbox.cost_gbp:,.0f}, "
+            f"{gearbox.efficiency:.0%} efficiency)"
         )
 
     default = (

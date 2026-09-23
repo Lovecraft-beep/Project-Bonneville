@@ -9,6 +9,17 @@ from tracks import BONNEVILLE_SALT_FLATS, DAYTONA_BEACH
 
 
 class GearboxShiftTests(unittest.TestCase):
+    def test_preset_vehicle_mass_tracks_component_weight_changes(self):
+        vehicle = create_blue_bird_1927(engine=NAPIER_LION)
+        original_mass = vehicle.mass
+
+        vehicle.engine = ROLLS_ROYCE_R
+
+        self.assertEqual(
+            vehicle.mass,
+            original_mass - NAPIER_LION.mass_kg + ROLLS_ROYCE_R.mass_kg,
+        )
+
     def test_measured_mile_starting_at_zero_includes_initial_timestep(self):
         vehicle = create_blue_bird_1927(engine=NAPIER_LION)
 
@@ -38,8 +49,7 @@ class GearboxShiftTests(unittest.TestCase):
 
         for sample in result.telemetry:
             wheel_revolutions_per_second = (
-                sample.speed_mph / 2.23694
-                / (2 * pi * vehicle.wheel_radius_m)
+                sample.speed_mph / 2.23694/ (2 * pi * vehicle.wheel_radius_m)
             )
             expected_rpm = (
                 wheel_revolutions_per_second

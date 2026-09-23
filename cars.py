@@ -188,21 +188,25 @@ AVAILABLE_CARS = {
 }
 
 
-def select_car(campaign=None):
+def select_car(campaign=None, include_prebuilt=True):
     print("\n=== SELECT VEHICLE ===")
-    for choice, create_vehicle in AVAILABLE_CARS.items():
-        print(f"{choice}. {create_vehicle().name}")
+    if include_prebuilt:
+        for choice, create_vehicle in AVAILABLE_CARS.items():
+            print(f"{choice}. {create_vehicle().name}")
 
     garage_vehicles = campaign.garage.vehicles if campaign is not None else []
     garage_choices = {}
     for offset, entry in enumerate(garage_vehicles):
-        choice_key = str(len(AVAILABLE_CARS) + 1 + offset)
+        choice_key = str((len(AVAILABLE_CARS) if include_prebuilt else 0) + 1 + offset)
         garage_choices[choice_key] = entry
         print(f"{choice_key}. {entry.vehicle_name} (garage)")
 
     choice = input("Choose a vehicle: ").strip()
     if choice in garage_choices:
         return build_vehicle_from_garage_entry(garage_choices[choice])
+    if not include_prebuilt:
+        print("Invalid choice. Career Mode uses garage vehicles only.")
+        return None
     if choice not in AVAILABLE_CARS:
         print("Invalid choice. Using Brick Mk1.")
         choice = "1"

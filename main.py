@@ -7,6 +7,7 @@ from encyclopedia import run_encyclopedia
 from engines import available_engines
 from gearbox import estimate_gear_limited_speed_mph, estimate_power_limited_speed_mph
 from historical_challenges import run_historical_challenges
+from historical_records import next_historical_target
 from management import (
     ENGINEER_HIRE_COST_GBP,
     MECHANIC_HIRE_COST_GBP,
@@ -45,7 +46,10 @@ from vehicle_designer import change_vehicle_component, design_vehicle
 
 
 def print_status(campaign):
-    print(f"\nTurn {campaign.turn_number} | {campaign.current_year} season")
+    print(
+        f"\nTurn {campaign.turn_number} | "
+        f"Day {campaign.current_day_of_year}, {campaign.current_year}"
+    )
     print(f"Team: {campaign.team.name}")
     print(f"Campaign funds: GBP {campaign.team.cash:,.0f}")
     print(f"Reputation: {campaign.team.reputation:.1f}")
@@ -101,6 +105,29 @@ def print_status(campaign):
         print(
             f"Best measured-mile speed: {campaign.best_measured_mile_speed_mph:.1f} mph"
         )
+    target = next_historical_target(
+        campaign.current_year, campaign.completed_historical_record_ids
+    )
+    if target:
+        gap = max(0.0, target.speed_mph - campaign.best_measured_mile_speed_mph)
+        print(
+            f"Campaign goal: beat {target.vehicle} ({target.year}) at "
+            f"{target.speed_mph:.1f} mph"
+        )
+        print(f"Milestone: {target.milestone}")
+        print(f"Target gap: {gap:.1f} mph")
+    else:
+        print("Historical target: all available records completed")
+    print("\nLatest headlines:")
+    for headline in campaign.world.headlines[-3:]:
+        print(f"- {headline}")
+    if campaign.world.reactions:
+        print(f"World reaction: {campaign.world.reactions[-1]}")
+    print("Rival standings:")
+    for rival in sorted(
+        campaign.world.rivals, key=lambda rival: rival.best_speed_mph, reverse=True
+    )[:3]:
+        print(f"- {rival.name}: {rival.best_speed_mph:.1f} mph ({rival.specialty})")
 
 
 def print_run_telemetry(result):
@@ -191,6 +218,25 @@ def print_run_comparison(baseline, rerun):
         )
 
 
+def print_record_celebration(target, result, reputation_before, campaign):
+    """Celebrate a historical target beaten during a record attempt."""
+    print("\n" + "=" * 68)
+    print("!!! HISTORICAL RECORD BROKEN !!!")
+    print("=" * 68)
+    print(f"Your team has beaten the {target.year} {target.vehicle} record!")
+    print(
+        f"Measured-mile speed: {result.measured_mile_speed_mph:.1f} mph "
+        f"(target {target.speed_mph:.1f} mph)"
+    )
+    print(f"Milestone: {target.milestone}")
+    print(
+        f"Reputation: {reputation_before:.1f} -> "
+        f"{campaign.team.reputation:.1f}"
+    )
+    print("The crowd erupts. Newspapers across the speed world are printing your name.")
+    print("=" * 68)
+
+
 def print_gearbox_warning(vehicle):
     """Warn when the highest gear is likely to cap the engine's speed."""
     power_speed = estimate_power_limited_speed_mph(vehicle, vehicle.engine)
@@ -224,10 +270,26 @@ def offer_component_rerun(campaign, vehicle, track, result):
         )
 
 
-def action_test_run(campaign, vehicle=None, track=None, comparison_result=None):
+def action_test_run(
+    campaign,
+    vehicle=None,
+    track=None,
+    comparison_result=None,
+    is_record_attempt=False,
+):
     """Run the test-run turn action: select a car and track, then simulate."""
-    vehicle = vehicle or select_car(campaign)
-    track = track or select_track()
+    if vehicle is None:
+        vehicle = select_car(campaign, include_prebuilt=False)
+        if vehicle is None:
+            return
+    track = track or select_track(campaign.current_year)
+    record_target = (
+        next_historical_target(
+            campaign.current_year, campaign.completed_historical_record_ids
+        )
+        if is_record_attempt
+        else None
+    )
     run_cost = calculate_run_cost(vehicle, track)
     vehicle.display()
     print_gearbox_warning(vehicle)
@@ -274,7 +336,7 @@ def action_test_run(campaign, vehicle=None, track=None, comparison_result=None):
     if outcome.failed:
         print(f"Aborted run: {outcome.failure_type.name}.")
         complete_failed_run(campaign, run_cost)
-        advance_turn(campaign)
+        advance_turn(campaign, days=7)
         save_campaign(campaign)
         if outcome.repaired:
             print("The team repaired the failure trackside for a future attempt.")
@@ -285,8 +347,25 @@ def action_test_run(campaign, vehicle=None, track=None, comparison_result=None):
         offer_component_rerun(campaign, vehicle, track, result)
         return
 
-    complete_run(campaign, run_cost, result.measured_mile_speed_mph)
-    advance_turn(campaign)
+    reputation_before = campaign.team.reputation
+    complete_run(
+        campaign,
+        run_cost,
+        result.measured_mile_speed_mph,
+        is_record_attempt=is_record_attempt,
+    )
+    if record_target:
+        if record_target.record_id in campaign.completed_historical_record_ids:
+            print_record_celebration(
+                record_target,
+                result,
+                reputation_before,
+                campaign,
+            )
+        else:
+            shortfall = record_target.speed_mph - result.measured_mile_speed_mph
+            print(f"Record attempt failed by {shortfall:.1f} mph.")
+    advance_turn(campaign, days=7)
     save_campaign(campaign)
     print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
     print(f"Campaign funds remaining: GBP {campaign.team.cash:,.0f}")
@@ -296,6 +375,25 @@ def action_test_run(campaign, vehicle=None, track=None, comparison_result=None):
     display_records(load_records(), campaign.campaign_id)
 
     offer_component_rerun(campaign, vehicle, track, result)
+
+
+def action_record_attempt(campaign):
+    """Attempt to beat the active historical campaign goal."""
+    target = next_historical_target(
+        campaign.current_year, campaign.completed_historical_record_ids
+    )
+    if target is None:
+        print("All historical campaign goals have been completed.")
+        return
+    if not campaign.garage.vehicles:
+        print("Build a garage vehicle before attempting a historical record.")
+        return
+    print(
+        f"\n=== RECORD ATTEMPT: {target.vehicle} ({target.year}) ===\n"
+        f"Target: {target.speed_mph:.1f} mph\n"
+        f"Milestone: {target.milestone}"
+    )
+    action_test_run(campaign, is_record_attempt=True)
 
 
 def action_research_engines(campaign):
@@ -524,15 +622,16 @@ def action_design_vehicle(campaign):
 
 MENU_ACTIONS = {
     "1": ("Test Run", action_test_run),
-    "2": ("Design Vehicle", action_design_vehicle),
-    "3": ("Research Engine Technology", action_research_engines),
-    "4": ("Research Chassis Technology", action_research_chassis),
-    "10": ("Research Gearbox Technology", action_research_gearbox),
-    "5": ("Hire Engineer", action_hire_engineer),
-    "6": ("Hire Mechanic", action_hire_mechanic),
-    "7": ("Upgrade Workshop", action_upgrade_workshop),
-    "8": ("Reset Campaign", action_reset_campaign),
-    "9": ("Sponsorship", action_sponsorship),
+    "2": ("Attempt Historical Record", action_record_attempt),
+    "3": ("Design Vehicle", action_design_vehicle),
+    "4": ("Research Engine Technology", action_research_engines),
+    "5": ("Research Chassis Technology", action_research_chassis),
+    "11": ("Research Gearbox Technology", action_research_gearbox),
+    "6": ("Hire Engineer", action_hire_engineer),
+    "7": ("Hire Mechanic", action_hire_mechanic),
+    "8": ("Upgrade Workshop", action_upgrade_workshop),
+    "9": ("Reset Campaign", action_reset_campaign),
+    "10": ("Sponsorship", action_sponsorship),
 }
 
 
@@ -545,10 +644,10 @@ def run_career_mode():
         print("\nWhat would you like to do?")
         for key, (label, _) in MENU_ACTIONS.items():
             print(f"{key}. {label}")
-        print("11. Back to Main Menu")
+        print("12. Back to Main Menu")
 
         choice = input("Choose an action: ").strip()
-        if choice == "11":
+        if choice == "12":
             break
 
         action = MENU_ACTIONS.get(choice)
