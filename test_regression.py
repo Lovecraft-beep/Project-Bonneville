@@ -9,6 +9,7 @@ challenge, and encyclopedia systems that aren't covered elsewhere.
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import records
@@ -16,6 +17,7 @@ from brakes import BRAKE_BY_NAME
 from brakes import available_brakes
 from cars import AVAILABLE_CARS
 from chassis import CHASSIS_BY_ID
+from diagnostics import diagnose_run
 from encyclopedia import ENCYCLOPEDIA_SECTIONS
 from engines import ALL_ENGINES, PIONEER_SINGLE_CYLINDER
 from gearbox import PREBUILT_GEARBOXES, TRANSMISSION_CATALOG
@@ -29,14 +31,21 @@ from management import (
     hire_engineer,
     load_campaign,
     research_chassis_technology,
+    research_aerodynamics_technology,
     research_engine_technology,
     reset_campaign,
     save_campaign,
     sign_sponsor,
 )
 from research import (
+    AERODYNAMICS_TECHNOLOGY_TREE,
     CHASSIS_TECHNOLOGY_TREE,
     ENGINE_TECHNOLOGY_TREE,
+    available_aerodynamics_technologies,
+    available_brake_technologies,
+    available_chassis_technologies,
+    available_engine_technologies,
+    available_tyre_technologies,
     current_chassis_era,
 )
 from simulation import run_simulation
@@ -64,6 +73,44 @@ class PresetVehicleRegressionTests(unittest.TestCase):
             self.assertLess(
                 result.measured_mile_speed_mph, IMPLAUSIBLE_SPEED_MPH, car_key
             )
+
+
+class EngineeringDiagnosisTests(unittest.TestCase):
+    def _diagnose(self, vehicle, **result_values):
+        result_data = {
+            "telemetry": [],
+            "wheelspin_event_count": 0,
+            "average_acceleration_g": 0.2,
+            "maximum_brake_temperature_c": 100.0,
+            "peak_speed_mph": 100.0,
+        }
+        result_data.update(result_values)
+        result = SimpleNamespace(**result_data)
+        return diagnose_run(vehicle, result)
+
+    def test_diagnosis_prioritises_brake_fade(self):
+        vehicle = AVAILABLE_CARS["1"]()
+        sample = SimpleNamespace(brake_fade=True, gear=1)
+        diagnosis = self._diagnose(
+            vehicle,
+            telemetry=[sample],
+            maximum_brake_temperature_c=300.0,
+            wheelspin_event_count=1,
+        )
+        self.assertEqual(diagnosis.recommended_component, "brakes")
+
+    def test_diagnosis_identifies_traction_loss(self):
+        vehicle = AVAILABLE_CARS["1"]()
+        diagnosis = self._diagnose(vehicle, wheelspin_event_count=2)
+        self.assertEqual(diagnosis.research_branch, "tyre technology")
+
+    def test_diagnosis_identifies_first_gear_limit(self):
+        vehicle = AVAILABLE_CARS["1"]()
+        diagnosis = self._diagnose(
+            vehicle,
+            telemetry=[SimpleNamespace(brake_fade=False, gear=1)],
+        )
+        self.assertEqual(diagnosis.recommended_component, "gearbox")
 
     def test_all_engines_torque_curve_across_rpm_range(self):
         for engine in ALL_ENGINES:
@@ -141,6 +188,42 @@ class EncyclopediaRegressionTests(unittest.TestCase):
 
 
 class CampaignProgressionRegressionTests(unittest.TestCase):
+    def test_aerodynamics_is_the_initial_research_path(self):
+        campaign = CampaignState()
+        available_aero = available_aerodynamics_technologies(
+            campaign.research.aerodynamics_technology,
+            campaign.research.chassis_technology,
+        )
+        self.assertEqual(available_aero[0].technology_id, "wind_deflector")
+        self.assertEqual(
+            available_chassis_technologies(
+                campaign.research.chassis_technology,
+                campaign.research.aerodynamics_technology,
+            ),
+            (),
+        )
+        self.assertEqual(
+            available_engine_technologies(
+                campaign.research.engine_technology,
+                campaign.research.chassis_technology,
+            ),
+            (),
+        )
+        self.assertEqual(
+            available_tyre_technologies(
+                campaign.research.tyre_technology,
+                campaign.research.chassis_technology,
+            ),
+            (),
+        )
+        self.assertEqual(
+            available_brake_technologies(
+                campaign.research.brake_technology,
+                campaign.research.chassis_technology,
+            ),
+            (),
+        )
+
     def test_runs_advance_days_without_moving_to_next_year(self):
         campaign = CampaignState(current_year=1895)
         advance_turn(campaign, days=7)
@@ -167,8 +250,18 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         campaign.team.cash = 10_000_000.0
         campaign.team.engineers = 10
 
+        for node in AERODYNAMICS_TECHNOLOGY_TREE[:3]:
+            research_aerodynamics_technology(campaign, node.technology_id)
         for node in CHASSIS_TECHNOLOGY_TREE:
             research_chassis_technology(campaign, node.technology_id)
+        while True:
+            available_aero = available_aerodynamics_technologies(
+                campaign.research.aerodynamics_technology,
+                campaign.research.chassis_technology,
+            )
+            if not available_aero:
+                break
+            research_aerodynamics_technology(campaign, available_aero[0].technology_id)
         for node in ENGINE_TECHNOLOGY_TREE:
             research_engine_technology(campaign, node.technology_id)
         self.assertEqual(

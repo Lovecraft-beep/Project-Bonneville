@@ -1,13 +1,8 @@
 """Research and development definitions for Project Bonneville.
 
-Chassis is the primary technology tree: it is the one continuous structural
-lineage running through five historical eras, from wooden pioneer carriages
-to next-generation composite chassis. Each era contributes five chassis
-tiers and a couple of named engine archetypes; each engine tier requires
-the previous engine tier plus a matching chassis tier, so structural
-capability always gates how much power a car can be built to handle.
-Future branches (gearboxes, tyres, aerodynamics, safety) can hang off the
-same chassis tiers using this pattern.
+Aerodynamics is the opening research path: basic streamlining unlocks the
+first chassis tier, after which the chassis tree anchors the engine and
+component branches through five historical eras.
 """
 
 from dataclasses import dataclass
@@ -21,6 +16,10 @@ class TechnologyNode:
     prerequisites: tuple[str, ...] = ()
     cost_gbp: float = 5_000.0
     engineers_required: int = 1
+    description: str = ""
+    drag_reduction: float = 0.0
+    cooling_penalty: float = 0.0
+    reputation_bonus: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -53,6 +52,124 @@ def _tier_cost_gbp(era_index, tier_index):
 
 def _tier_engineers_required(era_index, tier_index):
     return min(6, 1 + era_index + tier_index // 2)
+
+
+AERODYNAMICS_DETAILS = {
+    "Wind Deflector": (
+        "A small screen that protects the driver and slightly cleans the airflow.",
+        0.01,
+        0.0,
+        0.0,
+    ),
+    "Wheel Fairings / Spats": (
+        "Simple covers over the front wheels reduce turbulence at a modest build cost.",
+        0.02,
+        0.0,
+        0.0,
+    ),
+    "Basic Streamlining": (
+        "A rounded nose and shaped bodywork begin deliberate aerodynamic design.",
+        0.04,
+        0.0,
+        0.0,
+    ),
+    "Improved Wheel Spats": (
+        "Refined wheel fairings reduce drag further while demanding tighter construction.",
+        0.025,
+        0.0,
+        0.0,
+    ),
+    "Side-Mounted Radiators": (
+        "Moves cooling hardware out of the nose for a cleaner front profile, with a small cooling penalty.",
+        0.035,
+        0.03,
+        0.0,
+    ),
+    "Enclosed Cockpit": (
+        "A faired cockpit reduces drag but increases development and construction complexity.",
+        0.05,
+        0.0,
+        0.0,
+    ),
+    "Streamliner Body": (
+        "Full bodywork delivers a major drag reduction and earns attention as the future of speed.",
+        0.08,
+        0.0,
+        0.5,
+    ),
+    "Tuft Testing": (
+        "Wool tufts reveal separated airflow and make trackside testing more informative.",
+        0.01,
+        0.0,
+        0.0,
+    ),
+    "Aircraft Wind Tunnel Access": (
+        "Borrowed aircraft facilities allow larger and more reliable aerodynamic improvements.",
+        0.045,
+        0.0,
+        0.0,
+    ),
+    "Scale Model Testing": (
+        "Scale models improve prediction of full-size airflow before expensive construction.",
+        0.035,
+        0.0,
+        0.0,
+    ),
+    "Supersonic Flow Analysis": (
+        "Specialised analysis exposes shockwave behaviour before the car reaches extreme speed.",
+        0.05,
+        0.0,
+        0.0,
+    ),
+    "Wind Tunnel Programme": (
+        "A dedicated programme supports systematic body optimisation across many designs.",
+        0.06,
+        0.0,
+        0.0,
+    ),
+    "1/10 Scale Rocket Sled Tests": (
+        "Rocket sleds at ranges such as Pendine provide confidence data beyond a static tunnel.",
+        0.04,
+        0.0,
+        0.0,
+    ),
+    "Computational Flow Modelling": (
+        "Early computer analysis predicts pressure and separation before track testing.",
+        0.055,
+        0.0,
+        0.0,
+    ),
+    "Integrated Aero Programme": (
+        "Track, tunnel, and computer data become one disciplined optimisation loop.",
+        0.07,
+        0.0,
+        0.0,
+    ),
+    "CFD": (
+        "Computational fluid dynamics makes significant aerodynamic gains practical.",
+        0.08,
+        0.0,
+        0.0,
+    ),
+    "High Performance Computing": (
+        "More compute enables faster design iteration across a larger design space.",
+        0.04,
+        0.0,
+        0.0,
+    ),
+    "Digital Twin": (
+        "A digital twin predicts the behaviour of the evolving car before the next run.",
+        0.06,
+        0.0,
+        0.0,
+    ),
+    "Active Aerodynamics": (
+        "The car changes its aerodynamic shape between acceleration, record, and braking phases.",
+        0.10,
+        0.0,
+        0.0,
+    ),
+}
 
 
 # Five eras of land-speed-record history. Each contributes five ascending
@@ -256,7 +373,9 @@ def _build_trees(era_definitions):
             chassis_name = definition["chassis_tiers"][tier_index]
             chassis_id = _slugify(chassis_name)
             chassis_prerequisites = (
-                (previous_chassis_id,) if previous_chassis_id else ()
+                (previous_chassis_id,)
+                if previous_chassis_id
+                else ("basic_streamlining",)
             )
             chassis_tree.append(
                 TechnologyNode(
@@ -325,17 +444,30 @@ def _build_branch_tree(era_definitions, branch_key):
                 for prerequisite in (previous_id, era_chassis_ids[chassis_index])
                 if prerequisite
             )
+            if branch_key == "aerodynamics_tiers" and era_index == 0:
+                prerequisites = (previous_id,) if previous_id else ()
             technology_id = _slugify(technology_name)
             if era_index:
                 technology_id = f"{technology_id}_{era_index}"
+            description, drag_reduction, cooling_penalty, reputation_bonus = (
+                AERODYNAMICS_DETAILS.get(technology_name, ("", 0.0, 0.0, 0.0))
+                if branch_key == "aerodynamics_tiers"
+                else ("", 0.0, 0.0, 0.0)
+            )
             branch_tree.append(
                 TechnologyNode(
-                    technology_id,
-                    technology_name,
-                    definition["name"],
-                    prerequisites,
-                    _tier_cost_gbp(era_index, chassis_index),
-                    _tier_engineers_required(era_index, chassis_index),
+                    technology_id=technology_id,
+                    name=technology_name,
+                    era=definition["name"],
+                    prerequisites=prerequisites,
+                    cost_gbp=_tier_cost_gbp(era_index, chassis_index),
+                    engineers_required=_tier_engineers_required(
+                        era_index, chassis_index
+                    ),
+                    description=description,
+                    drag_reduction=drag_reduction,
+                    cooling_penalty=cooling_penalty,
+                    reputation_bonus=reputation_bonus,
                 )
             )
             previous_id = technology_id
@@ -344,11 +476,37 @@ def _build_branch_tree(era_definitions, branch_key):
 
 
 for _definition in ERA_DEFINITIONS:
-    _definition["aerodynamics_tiers"] = (
-        "Basic Streamlining",
-        "Racing Streamlining",
-        "Advanced Aerodynamics",
-    )
+    _definition["aerodynamics_tiers"] = {
+        "Pioneers": (
+            "Wind Deflector",
+            "Wheel Fairings / Spats",
+            "Basic Streamlining",
+        ),
+        "The Interwar Years": (
+            "Improved Wheel Spats",
+            "Side-Mounted Radiators",
+            "Enclosed Cockpit",
+            "Streamliner Body",
+        ),
+        "The Jet Age": (
+            "Tuft Testing",
+            "Aircraft Wind Tunnel Access",
+            "Scale Model Testing",
+            "Supersonic Flow Analysis",
+        ),
+        "The Professional Era": (
+            "Wind Tunnel Programme",
+            "1/10 Scale Rocket Sled Tests",
+            "Computational Flow Modelling",
+            "Integrated Aero Programme",
+        ),
+        "Modern and Future Speed": (
+            "CFD",
+            "High Performance Computing",
+            "Digital Twin",
+            "Active Aerodynamics",
+        ),
+    }[_definition["name"]]
     _definition["tyre_tiers"] = (
         "Pneumatic Racing Tyres",
         "High-Speed Tyres",
@@ -423,13 +581,13 @@ def current_era(tree, researched):
     return ERA_ORDER[-1]
 
 
-def available_chassis_technologies(researched):
+def available_chassis_technologies(researched, aerodynamics_researched=()):
     """Return chassis technologies whose prerequisites and era are unlocked.
 
     Chassis is the primary tree: it alone uses era-completion gating, since
     it is the game's single progression clock.
     """
-    researched_ids = set(researched)
+    researched_ids = set(researched) | set(aerodynamics_researched)
     open_eras = set(unlocked_eras(CHASSIS_TECHNOLOGY_TREE, researched_ids))
     return tuple(
         node
@@ -477,6 +635,29 @@ def available_aerodynamics_technologies(aerodynamics_researched, chassis_researc
         aerodynamics_researched,
         chassis_researched,
     )
+
+
+def aerodynamics_effects(researched):
+    """Return the cumulative aerodynamic effects of researched technologies."""
+    researched_ids = set(researched)
+    nodes = (
+        node
+        for node in AERODYNAMICS_TECHNOLOGY_TREE
+        if node.technology_id in researched_ids
+    )
+    return {
+        "drag_reduction": min(0.75, sum(node.drag_reduction for node in nodes)),
+        "cooling_penalty": sum(
+            node.cooling_penalty
+            for node in AERODYNAMICS_TECHNOLOGY_TREE
+            if node.technology_id in researched_ids
+        ),
+        "reputation_bonus": sum(
+            node.reputation_bonus
+            for node in AERODYNAMICS_TECHNOLOGY_TREE
+            if node.technology_id in researched_ids
+        ),
+    }
 
 
 def available_tyre_technologies(tyre_researched, chassis_researched):

@@ -1,14 +1,41 @@
 import unittest
 from math import pi
+from unittest.mock import patch
 
 from cars import create_blue_bird_1927, create_darracq_1905
 from engines import NAPIER_LION, ROLLS_ROYCE_R
 from gearbox import GOLDEN_ARROW_3_SPEED, Gearbox
 from simulation import run_simulation
 from tracks import BONNEVILLE_SALT_FLATS, DAYTONA_BEACH
+from vehicle_designer import tune_gearbox
 
 
 class GearboxShiftTests(unittest.TestCase):
+    def test_manual_final_drive_tuning_updates_existing_gearbox(self):
+        vehicle = create_blue_bird_1927(engine=NAPIER_LION)
+        with patch("builtins.input", side_effect=["1", "0.85"]):
+            changed = tune_gearbox(vehicle)
+
+        self.assertTrue(changed)
+        self.assertEqual(vehicle.gearbox.final_drive_ratio, 0.85)
+
+    def test_manual_gear_tuning_updates_selected_ratio(self):
+        vehicle = create_blue_bird_1927(engine=NAPIER_LION)
+        with patch("builtins.input", side_effect=["2", "2", "1.45"]):
+            changed = tune_gearbox(vehicle)
+
+        self.assertTrue(changed)
+        self.assertEqual(vehicle.gearbox.gears[1], 1.45)
+
+    def test_manual_gear_tuning_rejects_invalid_ratio(self):
+        vehicle = create_blue_bird_1927(engine=NAPIER_LION)
+        original_ratios = vehicle.gearbox.gears
+        with patch("builtins.input", side_effect=["2", "2", "8.0"]):
+            changed = tune_gearbox(vehicle)
+
+        self.assertFalse(changed)
+        self.assertEqual(vehicle.gearbox.gears, original_ratios)
+
     def test_preset_vehicle_mass_tracks_component_weight_changes(self):
         vehicle = create_blue_bird_1927(engine=NAPIER_LION)
         original_mass = vehicle.mass

@@ -2,7 +2,7 @@
 
 from cars import select_car
 from chassis import available_chassis
-from diagnostics import append_run_log
+from diagnostics import append_run_log, diagnose_run
 from encyclopedia import run_encyclopedia
 from engines import available_engines
 from gearbox import estimate_gear_limited_speed_mph, estimate_power_limited_speed_mph
@@ -21,6 +21,7 @@ from management import (
     hire_engineer,
     hire_mechanic,
     load_campaign,
+    research_aerodynamics_technology,
     research_chassis_technology,
     research_engine_technology,
     research_gearbox_technology,
@@ -35,6 +36,7 @@ from research import (
     CHASSIS_TECHNOLOGY_TREE,
     ENGINE_TECHNOLOGY_TREE,
     ERA_BY_NAME,
+    available_aerodynamics_technologies,
     available_chassis_technologies,
     available_engine_technologies,
     current_chassis_era,
@@ -67,12 +69,22 @@ def print_status(campaign):
         f"chassis unlocked)"
     )
     available_chassis_technology = available_chassis_technologies(
-        campaign.research.chassis_technology
+        campaign.research.chassis_technology,
+        campaign.research.aerodynamics_technology,
     )
     if available_chassis_technology:
         print(
             "Chassis research available: "
             + ", ".join(node.name for node in available_chassis_technology)
+        )
+    available_aerodynamics = available_aerodynamics_technologies(
+        campaign.research.aerodynamics_technology,
+        campaign.research.chassis_technology,
+    )
+    if available_aerodynamics:
+        print(
+            "Aerodynamics research available: "
+            + ", ".join(node.name for node in available_aerodynamics)
         )
     print(
         f"Engine technology level: "
@@ -116,9 +128,10 @@ def print_status(campaign):
         )
         print(f"Milestone: {target.milestone}")
         print(f"Target gap: {gap:.1f} mph")
-    else:
-        print("Historical target: all available records completed")
-    print("\nLatest headlines:")
+    print(
+        f"\nLatest headlines | Turn {campaign.turn_number} | "
+        f"Day {campaign.current_day_of_year}, {campaign.current_year}:"
+    )
     for headline in campaign.world.headlines[-3:]:
         print(f"- {headline}")
     if campaign.world.reactions:
@@ -163,6 +176,19 @@ def print_run_summary(result):
     print(f"Wheelspin Events: {result.wheelspin_event_count}")
     print(f"Maximum Brake Temperature: {result.maximum_brake_temperature_c} C")
     print(f"Measured Mile Speed: {result.measured_mile_speed_mph} mph")
+
+
+def print_run_diagnosis(vehicle, result):
+    """Show the next engineering problem suggested by the telemetry."""
+    diagnosis = diagnose_run(vehicle, result)
+    print("\n=== ENGINEERING DIAGNOSIS ===")
+    print(f"Problem: {diagnosis.problem}")
+    print(f"Evidence: {diagnosis.evidence}")
+    print(
+        f"Suggested path: research {diagnosis.research_branch}, "
+        f"then update the {diagnosis.recommended_component}."
+    )
+    return diagnosis
 
 
 def print_run_comparison(baseline, rerun):
@@ -255,13 +281,22 @@ def offer_component_rerun(campaign, vehicle, track, result):
         .strip()
         .lower()
     )
-    if change_choice == "yes" and change_vehicle_component(
+    if change_choice != "yes":
+        return
+    changed = change_vehicle_component(
         vehicle,
         campaign,
         allow_gearbox_optimization=campaign.research.has_gearbox_technology(
             "computer_optimised_gear_ratios"
         ),
-    ):
+    )
+    if changed:
+        for garage_vehicle in campaign.garage.vehicles:
+            if garage_vehicle.vehicle_name == vehicle.name:
+                garage_vehicle.gearbox_ratios = tuple(vehicle.gearbox.gears)
+                garage_vehicle.gearbox_final_drive = vehicle.gearbox.final_drive_ratio
+                break
+        save_campaign(campaign)
         action_test_run(
             campaign,
             vehicle=vehicle,
@@ -320,6 +355,7 @@ def action_test_run(
     )
     print_run_telemetry(result)
     print_run_summary(result)
+    print_run_diagnosis(vehicle, result)
     if comparison_result is not None:
         print_run_comparison(comparison_result, result)
 
@@ -465,6 +501,54 @@ def action_research_chassis(campaign):
 
     try:
         research_chassis_technology(campaign, technology.technology_id)
+    except ValueError as exc:
+        print(f"Unable to research {technology.name}: {exc}")
+        return
+
+    advance_turn(campaign)
+    save_campaign(campaign)
+    print(f"Researched {technology.name}.")
+    print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
+
+
+def action_research_aerodynamics(campaign):
+    """Spend cash, engineer time, and a turn to improve aerodynamics."""
+    available_technologies = available_aerodynamics_technologies(
+        campaign.research.aerodynamics_technology,
+        campaign.research.chassis_technology,
+    )
+    if not available_technologies:
+        print("No aerodynamics technologies are currently available to research.")
+        return
+
+    print("\nAvailable aerodynamics research projects:")
+    for index, node in enumerate(available_technologies, start=1):
+        print(
+            f"{index}. {node.name} "
+            f"(GBP {node.cost_gbp:,.0f}, {node.engineers_required} engineer(s))"
+        )
+        if node.description:
+            print(f"   {node.description}")
+        if node.drag_reduction:
+            print(f"   Drag reduction: {node.drag_reduction:.1%}")
+        if node.cooling_penalty:
+            print(f"   Cooling penalty: {node.cooling_penalty:.1%}")
+        if node.reputation_bonus:
+            print(f"   Reputation bonus: +{node.reputation_bonus:.1f}")
+
+    choice = input("Choose a research project (or press Enter to cancel): ").strip()
+    if not choice:
+        print("Research cancelled.")
+        return
+
+    try:
+        technology = available_technologies[int(choice) - 1]
+    except (ValueError, IndexError):
+        print("Invalid choice. Research cancelled.")
+        return
+
+    try:
+        research_aerodynamics_technology(campaign, technology.technology_id)
     except ValueError as exc:
         print(f"Unable to research {technology.name}: {exc}")
         return
@@ -626,6 +710,7 @@ MENU_ACTIONS = {
     "3": ("Design Vehicle", action_design_vehicle),
     "4": ("Research Engine Technology", action_research_engines),
     "5": ("Research Chassis Technology", action_research_chassis),
+    "12": ("Research Aerodynamics Technology", action_research_aerodynamics),
     "11": ("Research Gearbox Technology", action_research_gearbox),
     "6": ("Hire Engineer", action_hire_engineer),
     "7": ("Hire Mechanic", action_hire_mechanic),
@@ -644,10 +729,10 @@ def run_career_mode():
         print("\nWhat would you like to do?")
         for key, (label, _) in MENU_ACTIONS.items():
             print(f"{key}. {label}")
-        print("12. Back to Main Menu")
+        print("13. Back to Main Menu")
 
         choice = input("Choose an action: ").strip()
-        if choice == "12":
+        if choice == "13":
             break
 
         action = MENU_ACTIONS.get(choice)
@@ -697,6 +782,7 @@ def run_facility_vehicle_test(campaign, vehicle, track):
         append_run_log(vehicle, track, result)
         print_run_telemetry(result)
         print_run_summary(result)
+        print_run_diagnosis(vehicle, result)
         if previous_result is not None:
             print_run_comparison(previous_result, result)
 

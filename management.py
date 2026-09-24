@@ -162,6 +162,9 @@ class GarageVehicle:
     engine_name: str
     gearbox_name: str
     brakes_name: str
+    aerodynamics_technology: tuple[str, ...] = ()
+    gearbox_ratios: tuple[float, ...] = ()
+    gearbox_final_drive: float | None = None
 
 
 @dataclass
@@ -383,7 +386,10 @@ def research_chassis_technology(campaign, technology_id):
         raise ValueError(f"unknown chassis technology: {technology_id}")
     if campaign.research.has_chassis_technology(technology_id):
         raise ValueError(f"{technology.name} has already been researched")
-    if not set(technology.prerequisites).issubset(campaign.research.chassis_technology):
+    researched = set(campaign.research.chassis_technology) | set(
+        campaign.research.aerodynamics_technology
+    )
+    if not set(technology.prerequisites).issubset(researched):
         raise ValueError(f"prerequisites not met for {technology.name}")
     if campaign.team.cash < technology.cost_gbp:
         raise ValueError("insufficient funds for this research project")
