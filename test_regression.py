@@ -19,12 +19,20 @@ from cars import AVAILABLE_CARS
 from chassis import CHASSIS_BY_ID
 from diagnostics import diagnose_run
 from encyclopedia import ENCYCLOPEDIA_SECTIONS
-from engines import ALL_ENGINES, PIONEER_SINGLE_CYLINDER
+from engines import (
+    ALL_ENGINES,
+    ENGINE_TUNE_STAGES,
+    NAPIER_LION,
+    PIONEER_SINGLE_CYLINDER,
+    tune_engine,
+)
 from gearbox import PREBUILT_GEARBOXES, TRANSMISSION_CATALOG
 from historical_challenges import CHALLENGES
 from historical_records import HISTORICAL_TARGETS, next_historical_target
 from management import (
     CampaignState,
+    GarageVehicle,
+    Team,
     advance_turn,
     build_vehicle,
     complete_run,
@@ -48,14 +56,95 @@ from research import (
     available_tyre_technologies,
     current_chassis_era,
 )
+from reliability import calculate_failure_probability
 from simulation import run_simulation
 from sponsors import SPONSOR_CATALOG
 from tracks import BONNEVILLE_SALT_FLATS, available_tracks
-from vehicle_designer import build_vehicle_from_garage_entry, design_vehicle
+from vehicle_designer import (
+    build_vehicle_from_garage_entry,
+    design_vehicle,
+    tune_engine_stage,
+)
 
 # A measured-mile speed above this is a sign of a bug (e.g. the "measured
 # mile never reached" divide-by-zero regression), not a legitimately fast car.
 IMPLAUSIBLE_SPEED_MPH = 2_000.0
+
+
+class EngineTuningTests(unittest.TestCase):
+    def _garage_entry(self, stage=0):
+        return GarageVehicle(
+            vehicle_name="Tune Test",
+            chassis_id=CHASSIS_TECHNOLOGY_TREE[5].technology_id,
+            engine_name=NAPIER_LION.name,
+            gearbox_name=TRANSMISSION_CATALOG[2].name,
+            brakes_name="1920s mechanical drum brakes",
+            engine_tune_stage=stage,
+        )
+
+    def test_each_stage_trades_reliability_for_power(self):
+        previous = tune_engine(NAPIER_LION, 0)
+        for stage in range(1, len(ENGINE_TUNE_STAGES)):
+            tuned = tune_engine(NAPIER_LION, stage)
+            self.assertGreater(tuned.power_hp, previous.power_hp)
+            self.assertGreater(tuned.torque_nm, previous.torque_nm)
+            self.assertLess(tuned.reliability, previous.reliability)
+            previous = tuned
+
+    def test_tuning_does_not_mutate_catalogue_engine(self):
+        stock_power = NAPIER_LION.power_hp
+        stock_reliability = NAPIER_LION.reliability
+        tune_engine(NAPIER_LION, 3)
+        self.assertEqual(NAPIER_LION.power_hp, stock_power)
+        self.assertEqual(NAPIER_LION.reliability, stock_reliability)
+
+    def test_reliability_never_drops_below_floor(self):
+        tuned = tune_engine(PIONEER_SINGLE_CYLINDER, 3)
+        self.assertGreaterEqual(tuned.reliability, 0.05)
+
+    def test_retuning_is_based_on_stock_not_compounded(self):
+        vehicle = build_vehicle_from_garage_entry(self._garage_entry())
+        with patch("builtins.input", side_effect=["3"]):
+            self.assertTrue(tune_engine_stage(vehicle))
+        with patch("builtins.input", side_effect=["1"]):
+            self.assertTrue(tune_engine_stage(vehicle))
+        self.assertEqual(vehicle.engine.power_hp, tune_engine(NAPIER_LION, 1).power_hp)
+        self.assertEqual(vehicle.power, vehicle.engine.power_hp)
+
+    def test_invalid_stage_keeps_current_tune(self):
+        vehicle = build_vehicle_from_garage_entry(self._garage_entry())
+        with patch("builtins.input", side_effect=["9"]):
+            self.assertFalse(tune_engine_stage(vehicle))
+        self.assertEqual(vehicle.engine_tune_stage, 0)
+        self.assertEqual(vehicle.engine.power_hp, NAPIER_LION.power_hp)
+
+    def test_garage_rebuild_restores_tune_stage(self):
+        vehicle = build_vehicle_from_garage_entry(self._garage_entry(stage=2))
+        self.assertEqual(vehicle.engine_tune_stage, 2)
+        self.assertEqual(vehicle.engine.power_hp, tune_engine(NAPIER_LION, 2).power_hp)
+
+    def test_tuned_engine_is_faster_and_riskier(self):
+        stock = build_vehicle_from_garage_entry(self._garage_entry())
+        tuned = build_vehicle_from_garage_entry(self._garage_entry(stage=3))
+        track = BONNEVILLE_SALT_FLATS
+        results = [
+            run_simulation(
+                vehicle,
+                track_miles=track.length_miles,
+                measured_mile_start=track.measured_mile_start,
+                track_friction_factor=track.friction_factor,
+                air_density_kg_m3=track.air_density_kg_m3,
+            )
+            for vehicle in (stock, tuned)
+        ]
+        self.assertGreater(
+            results[1].measured_mile_speed_mph, results[0].measured_mile_speed_mph
+        )
+        team = Team()
+        self.assertGreater(
+            calculate_failure_probability(tuned.engine, 200.0, team),
+            calculate_failure_probability(stock.engine, 200.0, team),
+        )
 
 
 class PresetVehicleRegressionTests(unittest.TestCase):

@@ -38,6 +38,7 @@ class Vehicle:
         self.wheel_radius_m = wheel_radius_m
         self.gearbox = gearbox or Gearbox(name="Standard Gearbox", gears=(3.0,))
         self.brakes = brakes
+        self.engine_tune_stage = 0
         self._initial_component_mass_kg = self._component_mass_kg
 
     @property
@@ -65,6 +66,8 @@ class Vehicle:
             print(f"Year: {self.model_year}")
         if self.engine:
             print(f"Engine: {self.engine.name}")
+            if self.engine_tune_stage:
+                print(f"Engine Tune: Stage {self.engine_tune_stage}")
             print(f"Cylinders: {self.engine.cylinders}")
             print(f"Engine Reliability: {self.engine.reliability}")
             print(f"Engine Max RPM: {self.engine.max_rpm}")

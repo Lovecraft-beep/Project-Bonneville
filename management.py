@@ -165,6 +165,7 @@ class GarageVehicle:
     aerodynamics_technology: tuple[str, ...] = ()
     gearbox_ratios: tuple[float, ...] = ()
     gearbox_final_drive: float | None = None
+    engine_tune_stage: int = 0
 
 
 @dataclass

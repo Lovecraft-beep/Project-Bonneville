@@ -1,6 +1,15 @@
 """Historically inspired engine definitions for Project Bonneville."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+# (stage, label, power multiplier, reliability penalty)
+ENGINE_TUNE_STAGES = (
+    (0, "Stock", 1.00, 0.00),
+    (1, "Stage 1 - Richer mixture and ignition advance", 1.04, 0.03),
+    (2, "Stage 2 - Raised compression", 1.08, 0.07),
+    (3, "Stage 3 - Maximum boost, minimal margin", 1.12, 0.12),
+)
+MIN_TUNED_RELIABILITY = 0.05
 
 
 @dataclass(frozen=True)
@@ -295,6 +304,20 @@ ALL_ENGINES = (
 )
 
 AVAILABLE_ENGINES = {engine.name: engine for engine in ALL_ENGINES}
+
+
+def tune_engine(stock_engine, stage):
+    """Return a copy of a stock engine tuned to the given stage."""
+    _, _, power_multiplier, reliability_penalty = ENGINE_TUNE_STAGES[stage]
+    return replace(
+        stock_engine,
+        power_hp=round(stock_engine.power_hp * power_multiplier, 1),
+        torque_nm=round(stock_engine.torque_nm * power_multiplier, 1),
+        reliability=round(
+            max(MIN_TUNED_RELIABILITY, stock_engine.reliability - reliability_penalty),
+            3,
+        ),
+    )
 
 
 def is_engine_unlocked(engine, researched_technologies):

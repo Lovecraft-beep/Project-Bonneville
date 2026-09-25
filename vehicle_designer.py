@@ -5,7 +5,7 @@ from dataclasses import replace
 
 from brakes import BRAKE_BY_NAME, select_brakes
 from chassis import CHASSIS_BY_ID, select_chassis
-from engines import AVAILABLE_ENGINES, select_engine
+from engines import AVAILABLE_ENGINES, ENGINE_TUNE_STAGES, select_engine, tune_engine
 from gearbox import AVAILABLE_GEARBOXES, optimize_gearbox_for_engine, select_gearbox
 from management import GarageVehicle
 from research import aerodynamics_effects
@@ -70,15 +70,16 @@ def design_vehicle(campaign):
 def change_vehicle_component(vehicle, campaign, allow_gearbox_optimization=False):
     """Change one installed component and return whether a change was made."""
     print("\n=== CHANGE COMPONENT ===")
-    print("1. Engine")
-    print("2. Replace gearbox")
-    print("3. Tune gear ratios")
-    print("4. Brakes")
+    print("1. Replace engine")
+    print("2. Tune engine")
+    print("3. Replace gearbox")
+    print("4. Tune gear ratios")
+    print("5. Brakes")
     if allow_gearbox_optimization:
-        print("5. Optimise gear ratios")
-        print("6. Keep current components")
+        print("6. Optimise gear ratios")
+        print("7. Keep current components")
     else:
-        print("5. Keep current components")
+        print("6. Keep current components")
     choice = input("Choose a component: ").strip()
 
     if choice == "1":
@@ -89,31 +90,78 @@ def change_vehicle_component(vehicle, campaign, allow_gearbox_optimization=False
         vehicle.engine = engine
         vehicle.power = engine.power_hp
         vehicle.peak_torque_nm = engine.torque_nm
+        vehicle.engine_tune_stage = 0
     elif choice == "2":
+        return tune_engine_stage(vehicle)
+    elif choice == "3":
         vehicle.gearbox = select_gearbox(
             vehicle.engine,
             current_gearbox=vehicle.gearbox,
         )
-    elif choice == "3":
-        return tune_gearbox(vehicle)
     elif choice == "4":
+        return tune_gearbox(vehicle)
+    elif choice == "5":
         vehicle.brakes = select_brakes(
             current_brakes=vehicle.brakes,
             current_year=campaign.current_year,
         )
-    elif choice == "5" and allow_gearbox_optimization:
+    elif choice == "6" and allow_gearbox_optimization:
         optimize_gearbox_for_engine(vehicle)
         print(
             f"Optimised gearbox: ratios {vehicle.gearbox.gears}, "
             f"final drive {vehicle.gearbox.final_drive_ratio}."
         )
-    elif choice == "5" or (choice == "6" and allow_gearbox_optimization):
+    elif choice == "6" or (choice == "7" and allow_gearbox_optimization):
         return False
     else:
         print("Invalid component choice.")
         return False
 
     print(f"Updated component on {vehicle.name}.")
+    return True
+
+
+def apply_engine_tune(vehicle, stage):
+    """Install the given tune stage on the vehicle's stock engine."""
+    engine = tune_engine(AVAILABLE_ENGINES[vehicle.engine.name], stage)
+    vehicle.engine = engine
+    vehicle.power = engine.power_hp
+    vehicle.peak_torque_nm = engine.torque_nm
+    vehicle.engine_tune_stage = stage
+
+
+def tune_engine_stage(vehicle):
+    """Trade engine reliability for power by choosing a tune stage."""
+    stock_engine = AVAILABLE_ENGINES.get(vehicle.engine.name)
+    if stock_engine is None:
+        print("This engine cannot be tuned.")
+        return False
+
+    print("\n=== TUNE ENGINE ===")
+    print(f"Current tune: Stage {vehicle.engine_tune_stage}")
+    for stage, label, _, _ in ENGINE_TUNE_STAGES:
+        tuned = tune_engine(stock_engine, stage)
+        marker = "* " if stage == vehicle.engine_tune_stage else "  "
+        print(
+            f"{stage}. {marker}{label}: {tuned.power_hp:,.1f} hp, "
+            f"reliability {tuned.reliability:.0%}"
+        )
+    try:
+        stage = int(input("Choose a tune stage: ").strip())
+    except ValueError:
+        print("Invalid tune stage. Keeping current tune.")
+        return False
+    if not 0 <= stage < len(ENGINE_TUNE_STAGES):
+        print("That tune stage does not exist.")
+        return False
+    if stage == vehicle.engine_tune_stage:
+        return False
+
+    apply_engine_tune(vehicle, stage)
+    print(
+        f"Engine tuned to Stage {stage}: {vehicle.engine.power_hp:,.1f} hp, "
+        f"reliability {vehicle.engine.reliability:.0%}."
+    )
     return True
 
 
@@ -179,7 +227,7 @@ def build_vehicle_from_garage_entry(entry):
         gearbox.final_drive = entry.gearbox_final_drive
     brakes = replace(BRAKE_BY_NAME[entry.brakes_name])
     aero_effects = aerodynamics_effects(entry.aerodynamics_technology)
-    return Vehicle(
+    vehicle = Vehicle(
         name=entry.vehicle_name,
         mass=chassis.mass_kg,
         cd=chassis.drag_coefficient * (1.0 - aero_effects["drag_reduction"]),
@@ -191,3 +239,6 @@ def build_vehicle_from_garage_entry(entry):
         brakes=brakes,
         component_mass_enabled=True,
     )
+    if entry.engine_tune_stage:
+        apply_engine_tune(vehicle, entry.engine_tune_stage)
+    return vehicle

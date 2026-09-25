@@ -293,8 +293,12 @@ def offer_component_rerun(campaign, vehicle, track, result):
     if changed:
         for garage_vehicle in campaign.garage.vehicles:
             if garage_vehicle.vehicle_name == vehicle.name:
+                garage_vehicle.engine_name = vehicle.engine.name
+                garage_vehicle.engine_tune_stage = vehicle.engine_tune_stage
+                garage_vehicle.gearbox_name = vehicle.gearbox.name
                 garage_vehicle.gearbox_ratios = tuple(vehicle.gearbox.gears)
                 garage_vehicle.gearbox_final_drive = vehicle.gearbox.final_drive_ratio
+                garage_vehicle.brakes_name = vehicle.brakes.name
                 break
         save_campaign(campaign)
         action_test_run(
