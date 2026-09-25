@@ -39,6 +39,8 @@ class Vehicle:
         self.gearbox = gearbox or Gearbox(name="Standard Gearbox", gears=(3.0,))
         self.brakes = brakes
         self.engine_tune_stage = 0
+        self.chassis_id = None
+        self.aerodynamics_technology = ()
         self._initial_component_mass_kg = self._component_mass_kg
 
     @property

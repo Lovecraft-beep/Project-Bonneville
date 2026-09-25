@@ -38,6 +38,8 @@ def design_vehicle(campaign):
         brakes=brakes,
         component_mass_enabled=True,
     )
+    vehicle.chassis_id = chassis.chassis_id
+    vehicle.aerodynamics_technology = tuple(campaign.research.aerodynamics_technology)
 
     cost_gbp = round(
         chassis.cost_gbp + engine.purchase_cost_gbp + gearbox.cost_gbp + brakes.cost_gbp
@@ -69,55 +71,94 @@ def design_vehicle(campaign):
 
 def change_vehicle_component(vehicle, campaign, allow_gearbox_optimization=False):
     """Change one installed component and return whether a change was made."""
-    print("\n=== CHANGE COMPONENT ===")
-    print("1. Replace engine")
-    print("2. Tune engine")
-    print("3. Replace gearbox")
-    print("4. Tune gear ratios")
-    print("5. Brakes")
+    options = [
+        ("Replace engine", lambda: _replace_engine(vehicle, campaign)),
+        ("Tune engine", lambda: tune_engine_stage(vehicle)),
+        ("Replace gearbox", lambda: _replace_gearbox(vehicle)),
+        ("Tune gear ratios", lambda: tune_gearbox(vehicle)),
+        ("Brakes", lambda: _replace_brakes(vehicle, campaign)),
+    ]
+    if has_new_aerodynamics(vehicle, campaign):
+        options.append(
+            ("Fit latest aerodynamics package", lambda: fit_latest_aerodynamics(vehicle, campaign))
+        )
     if allow_gearbox_optimization:
-        print("6. Optimise gear ratios")
-        print("7. Keep current components")
-    else:
-        print("6. Keep current components")
+        options.append(("Optimise gear ratios", lambda: _optimise_gearbox(vehicle)))
+
+    print("\n=== CHANGE COMPONENT ===")
+    for number, (label, _) in enumerate(options, start=1):
+        print(f"{number}. {label}")
+    print(f"{len(options) + 1}. Keep current components")
     choice = input("Choose a component: ").strip()
 
-    if choice == "1":
-        engine = select_engine(
-            campaign.research.engine_technology,
-            current_engine=vehicle.engine,
-        )
-        vehicle.engine = engine
-        vehicle.power = engine.power_hp
-        vehicle.peak_torque_nm = engine.torque_nm
-        vehicle.engine_tune_stage = 0
-    elif choice == "2":
-        return tune_engine_stage(vehicle)
-    elif choice == "3":
-        vehicle.gearbox = select_gearbox(
-            vehicle.engine,
-            current_gearbox=vehicle.gearbox,
-        )
-    elif choice == "4":
-        return tune_gearbox(vehicle)
-    elif choice == "5":
-        vehicle.brakes = select_brakes(
-            current_brakes=vehicle.brakes,
-            current_year=campaign.current_year,
-        )
-    elif choice == "6" and allow_gearbox_optimization:
-        optimize_gearbox_for_engine(vehicle)
-        print(
-            f"Optimised gearbox: ratios {vehicle.gearbox.gears}, "
-            f"final drive {vehicle.gearbox.final_drive_ratio}."
-        )
-    elif choice == "6" or (choice == "7" and allow_gearbox_optimization):
+    if choice == str(len(options) + 1):
         return False
-    else:
+    try:
+        _, change = options[int(choice) - 1]
+    except (ValueError, IndexError):
         print("Invalid component choice.")
         return False
+    return change()
 
+
+def _replace_engine(vehicle, campaign):
+    engine = select_engine(
+        campaign.research.engine_technology,
+        current_engine=vehicle.engine,
+    )
+    vehicle.engine = engine
+    vehicle.power = engine.power_hp
+    vehicle.peak_torque_nm = engine.torque_nm
+    vehicle.engine_tune_stage = 0
     print(f"Updated component on {vehicle.name}.")
+    return True
+
+
+def _replace_gearbox(vehicle):
+    vehicle.gearbox = select_gearbox(
+        vehicle.engine,
+        current_gearbox=vehicle.gearbox,
+    )
+    print(f"Updated component on {vehicle.name}.")
+    return True
+
+
+def _replace_brakes(vehicle, campaign):
+    vehicle.brakes = select_brakes(
+        current_brakes=vehicle.brakes,
+        current_year=campaign.current_year,
+    )
+    print(f"Updated component on {vehicle.name}.")
+    return True
+
+
+def _optimise_gearbox(vehicle):
+    optimize_gearbox_for_engine(vehicle)
+    print(
+        f"Optimised gearbox: ratios {vehicle.gearbox.gears}, "
+        f"final drive {vehicle.gearbox.final_drive_ratio}."
+    )
+    return True
+
+
+def has_new_aerodynamics(vehicle, campaign):
+    """Return whether the team has researched aero not yet fitted to this car."""
+    return vehicle.chassis_id is not None and bool(
+        set(campaign.research.aerodynamics_technology)
+        - set(vehicle.aerodynamics_technology)
+    )
+
+
+def fit_latest_aerodynamics(vehicle, campaign):
+    """Refit the car's bodywork with every aero technology researched so far."""
+    researched = tuple(campaign.research.aerodynamics_technology)
+    drag_reduction = aerodynamics_effects(researched)["drag_reduction"]
+    previous_cd = vehicle.cd
+    vehicle.cd = CHASSIS_BY_ID[vehicle.chassis_id].drag_coefficient * (
+        1.0 - drag_reduction
+    )
+    vehicle.aerodynamics_technology = researched
+    print(f"Fitted latest aerodynamics: Cd {previous_cd:.3f} -> {vehicle.cd:.3f}.")
     return True
 
 
@@ -239,6 +280,8 @@ def build_vehicle_from_garage_entry(entry):
         brakes=brakes,
         component_mass_enabled=True,
     )
+    vehicle.chassis_id = entry.chassis_id
+    vehicle.aerodynamics_technology = tuple(entry.aerodynamics_technology)
     if entry.engine_tune_stage:
         apply_engine_tune(vehicle, entry.engine_tune_stage)
     return vehicle

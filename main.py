@@ -39,6 +39,7 @@ from research import (
     available_aerodynamics_technologies,
     available_chassis_technologies,
     available_engine_technologies,
+    blocking_prerequisites,
     current_chassis_era,
 )
 from simulation import run_simulation
@@ -274,6 +275,41 @@ def print_gearbox_warning(vehicle):
         )
 
 
+def save_vehicle_to_garage(campaign, vehicle):
+    """Write a vehicle's installed setup back to its garage entry and save."""
+    for garage_vehicle in campaign.garage.vehicles:
+        if garage_vehicle.vehicle_name == vehicle.name:
+            garage_vehicle.engine_name = vehicle.engine.name
+            garage_vehicle.engine_tune_stage = vehicle.engine_tune_stage
+            garage_vehicle.gearbox_name = vehicle.gearbox.name
+            garage_vehicle.gearbox_ratios = tuple(vehicle.gearbox.gears)
+            garage_vehicle.gearbox_final_drive = vehicle.gearbox.final_drive_ratio
+            garage_vehicle.brakes_name = vehicle.brakes.name
+            garage_vehicle.aerodynamics_technology = tuple(
+                vehicle.aerodynamics_technology
+            )
+            break
+    save_campaign(campaign)
+
+
+def _gearbox_optimisation_unlocked(campaign):
+    return campaign.research.has_gearbox_technology("computer_optimised_gear_ratios")
+
+
+def offer_pre_run_upgrades(campaign, vehicle):
+    """Let the player upgrade a garage vehicle before committing to a run."""
+    while (
+        input("Upgrade this vehicle before the run? (yes/no): ").strip().lower()
+        == "yes"
+    ):
+        if change_vehicle_component(
+            vehicle,
+            campaign,
+            allow_gearbox_optimization=_gearbox_optimisation_unlocked(campaign),
+        ):
+            save_vehicle_to_garage(campaign, vehicle)
+
+
 def offer_component_rerun(campaign, vehicle, track, result):
     """Offer a same-track rerun with one changed vehicle component."""
     change_choice = (
@@ -286,21 +322,10 @@ def offer_component_rerun(campaign, vehicle, track, result):
     changed = change_vehicle_component(
         vehicle,
         campaign,
-        allow_gearbox_optimization=campaign.research.has_gearbox_technology(
-            "computer_optimised_gear_ratios"
-        ),
+        allow_gearbox_optimization=_gearbox_optimisation_unlocked(campaign),
     )
     if changed:
-        for garage_vehicle in campaign.garage.vehicles:
-            if garage_vehicle.vehicle_name == vehicle.name:
-                garage_vehicle.engine_name = vehicle.engine.name
-                garage_vehicle.engine_tune_stage = vehicle.engine_tune_stage
-                garage_vehicle.gearbox_name = vehicle.gearbox.name
-                garage_vehicle.gearbox_ratios = tuple(vehicle.gearbox.gears)
-                garage_vehicle.gearbox_final_drive = vehicle.gearbox.final_drive_ratio
-                garage_vehicle.brakes_name = vehicle.brakes.name
-                break
-        save_campaign(campaign)
+        save_vehicle_to_garage(campaign, vehicle)
         action_test_run(
             campaign,
             vehicle=vehicle,
@@ -321,6 +346,7 @@ def action_test_run(
         vehicle = select_car(campaign, include_prebuilt=False)
         if vehicle is None:
             return
+        offer_pre_run_upgrades(campaign, vehicle)
     track = track or select_track(campaign.current_year)
     record_target = (
         next_historical_target(
@@ -444,6 +470,11 @@ def action_research_engines(campaign):
     )
     if not available_technologies:
         print("No engine technologies are currently available to research.")
+        print_blocking_prerequisites(
+            ENGINE_TECHNOLOGY_TREE,
+            campaign.research.engine_technology
+            + campaign.research.chassis_technology,
+        )
         return
 
     print("\nAvailable engine research projects:")
@@ -476,13 +507,25 @@ def action_research_engines(campaign):
     print(f"Next turn: {campaign.turn_number} | {campaign.current_year} season")
 
 
+def print_blocking_prerequisites(tree, researched):
+    blockers = blocking_prerequisites(tree, researched)
+    if blockers:
+        print("Research first: " + ", ".join(blockers))
+
+
 def action_research_chassis(campaign):
     """Spend cash, engineer time, and a turn to unlock a chassis technology."""
     available_technologies = available_chassis_technologies(
-        campaign.research.chassis_technology
+        campaign.research.chassis_technology,
+        campaign.research.aerodynamics_technology,
     )
     if not available_technologies:
         print("No chassis technologies are currently available to research.")
+        print_blocking_prerequisites(
+            CHASSIS_TECHNOLOGY_TREE,
+            campaign.research.chassis_technology
+            + campaign.research.aerodynamics_technology,
+        )
         return
 
     print("\nAvailable chassis research projects:")

@@ -446,6 +446,12 @@ def _build_branch_tree(era_definitions, branch_key):
             )
             if branch_key == "aerodynamics_tiers" and era_index == 0:
                 prerequisites = (previous_id,) if previous_id else ()
+            cost_gbp = _tier_cost_gbp(era_index, chassis_index)
+            engineers_required = _tier_engineers_required(era_index, chassis_index)
+            if branch_key == "aerodynamics_tiers" and era_index == 0:
+                # The opening path gates chassis research, so a starting team must afford it.
+                cost_gbp = _tier_cost_gbp(0, tier_index)
+                engineers_required = 1
             technology_id = _slugify(technology_name)
             if era_index:
                 technology_id = f"{technology_id}_{era_index}"
@@ -460,10 +466,8 @@ def _build_branch_tree(era_definitions, branch_key):
                     name=technology_name,
                     era=definition["name"],
                     prerequisites=prerequisites,
-                    cost_gbp=_tier_cost_gbp(era_index, chassis_index),
-                    engineers_required=_tier_engineers_required(
-                        era_index, chassis_index
-                    ),
+                    cost_gbp=cost_gbp,
+                    engineers_required=engineers_required,
                     description=description,
                     drag_reduction=drag_reduction,
                     cooling_penalty=cooling_penalty,
@@ -547,6 +551,31 @@ GEARBOX_TECHNOLOGY_BY_ID = {
     node.technology_id: node for node in GEARBOX_TECHNOLOGY_TREE
 }
 ERA_BY_NAME = {era.name: era for era in ERAS}
+TECHNOLOGY_NAME_BY_ID = {
+    node.technology_id: node.name
+    for tree in (
+        CHASSIS_TECHNOLOGY_TREE,
+        ENGINE_TECHNOLOGY_TREE,
+        AERODYNAMICS_TECHNOLOGY_TREE,
+        TYRE_TECHNOLOGY_TREE,
+        BRAKE_TECHNOLOGY_TREE,
+        GEARBOX_TECHNOLOGY_TREE,
+    )
+    for node in tree
+}
+
+
+def blocking_prerequisites(tree, researched):
+    """Return names of missing prerequisites for the next unresearched node."""
+    researched_ids = set(researched)
+    for node in tree:
+        if node.technology_id not in researched_ids:
+            return tuple(
+                TECHNOLOGY_NAME_BY_ID[prerequisite]
+                for prerequisite in node.prerequisites
+                if prerequisite not in researched_ids
+            )
+    return ()
 ERA_ORDER = tuple(era.name for era in ERAS)
 
 

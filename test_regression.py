@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import records
+import main
 from brakes import BRAKE_BY_NAME
 from brakes import available_brakes
 from cars import AVAILABLE_CARS
@@ -62,7 +63,9 @@ from sponsors import SPONSOR_CATALOG
 from tracks import BONNEVILLE_SALT_FLATS, available_tracks
 from vehicle_designer import (
     build_vehicle_from_garage_entry,
+    change_vehicle_component,
     design_vehicle,
+    has_new_aerodynamics,
     tune_engine_stage,
 )
 
@@ -162,6 +165,104 @@ class PresetVehicleRegressionTests(unittest.TestCase):
             self.assertLess(
                 result.measured_mile_speed_mph, IMPLAUSIBLE_SPEED_MPH, car_key
             )
+
+
+class VehicleUpgradeTests(unittest.TestCase):
+    def setUp(self):
+        self.campaign = CampaignState()
+        self.entry = GarageVehicle(
+            vehicle_name="Upgrade Test",
+            chassis_id=CHASSIS_TECHNOLOGY_TREE[0].technology_id,
+            engine_name=PIONEER_SINGLE_CYLINDER.name,
+            gearbox_name=TRANSMISSION_CATALOG[1].name,
+            brakes_name="Wooden block brakes",
+        )
+        self.campaign.garage.vehicles.append(self.entry)
+        self.vehicle = build_vehicle_from_garage_entry(self.entry)
+
+    def test_pre_run_upgrade_is_saved_to_garage(self):
+        with patch.object(main, "save_campaign"), patch(
+            "builtins.input", side_effect=["yes", "2", "1", "no"]
+        ):
+            main.offer_pre_run_upgrades(self.campaign, self.vehicle)
+
+        self.assertEqual(self.entry.engine_tune_stage, 1)
+        rebuilt = build_vehicle_from_garage_entry(self.entry)
+        self.assertEqual(rebuilt.engine.power_hp, self.vehicle.engine.power_hp)
+
+    def test_declining_pre_run_upgrade_leaves_vehicle_unchanged(self):
+        with patch.object(main, "save_campaign") as save, patch(
+            "builtins.input", side_effect=["no"]
+        ):
+            main.offer_pre_run_upgrades(self.campaign, self.vehicle)
+
+        save.assert_not_called()
+        self.assertEqual(self.entry.engine_tune_stage, 0)
+
+    def test_aero_refit_only_offered_when_new_aero_researched(self):
+        self.assertFalse(has_new_aerodynamics(self.vehicle, self.campaign))
+        self.campaign.research.aerodynamics_technology.append("wind_deflector")
+        self.assertTrue(has_new_aerodynamics(self.vehicle, self.campaign))
+
+    def test_aero_refit_lowers_drag_and_persists(self):
+        self.campaign.research.aerodynamics_technology.extend(
+            ["wind_deflector", "wheel_fairings_/_spats"]
+        )
+        original_cd = self.vehicle.cd
+        # Aero is option 6: after the five fixed component options.
+        with patch.object(main, "save_campaign"), patch(
+            "builtins.input", side_effect=["yes", "6", "no"]
+        ):
+            main.offer_pre_run_upgrades(self.campaign, self.vehicle)
+
+        self.assertLess(self.vehicle.cd, original_cd)
+        self.assertFalse(has_new_aerodynamics(self.vehicle, self.campaign))
+        rebuilt = build_vehicle_from_garage_entry(self.entry)
+        self.assertAlmostEqual(rebuilt.cd, self.vehicle.cd)
+
+    def test_keep_current_components_makes_no_change(self):
+        with patch("builtins.input", side_effect=["6"]):
+            self.assertFalse(change_vehicle_component(self.vehicle, self.campaign))
+
+
+class ResearchMenuTests(unittest.TestCase):
+    def _pioneer_aero_campaign(self):
+        campaign = CampaignState()
+        for node in AERODYNAMICS_TECHNOLOGY_TREE[:3]:
+            research_aerodynamics_technology(campaign, node.technology_id)
+        return campaign
+
+    def test_starting_team_can_complete_opening_path(self):
+        campaign = self._pioneer_aero_campaign()
+        research_chassis_technology(campaign, "carriage_frame")
+        research_engine_technology(campaign, "pioneer_engines")
+        self.assertEqual(campaign.team.engineers, 1)
+        self.assertGreater(campaign.team.cash, 0)
+
+    def test_chassis_menu_opens_after_basic_streamlining(self):
+        campaign = self._pioneer_aero_campaign()
+        with patch.object(main, "save_campaign"), patch(
+            "builtins.input", side_effect=["1"]
+        ):
+            main.action_research_chassis(campaign)
+        self.assertEqual(campaign.research.chassis_technology, ["carriage_frame"])
+
+    def test_engine_menu_opens_after_first_chassis_tier(self):
+        campaign = self._pioneer_aero_campaign()
+        research_chassis_technology(campaign, "carriage_frame")
+        with patch.object(main, "save_campaign"), patch(
+            "builtins.input", side_effect=["1"]
+        ):
+            main.action_research_engines(campaign)
+        self.assertEqual(campaign.research.engine_technology, ["pioneer_engines"])
+
+    def test_blocked_chassis_research_names_missing_aero(self):
+        campaign = CampaignState()
+        research_aerodynamics_technology(campaign, "wind_deflector")
+        with patch("builtins.print") as printed:
+            main.action_research_chassis(campaign)
+        output = " ".join(str(call.args[0]) for call in printed.call_args_list)
+        self.assertIn("Research first: Basic Streamlining", output)
 
 
 class EngineeringDiagnosisTests(unittest.TestCase):
