@@ -12,7 +12,13 @@ record attempts.
 
 ## Current Prototype
 
-The current application runs one command-line land-speed test. It models:
+Version 0.5 introduces a button-driven desktop interface with a campaign
+dashboard, research tree, vehicle garage and designer, test-run setup, and
+speed/acceleration telemetry graphs. It uses Tkinter from the Python standard
+library and keeps the existing campaign, vehicle, reliability, and simulation
+rules.
+
+The simulation models:
 
 - Vehicle mass, engine power, drag coefficient, and frontal area
 - Aerodynamic drag using `Fd = 0.5 * Cd * rho * v^2 * A`
@@ -96,9 +102,10 @@ From the project directory, run:
 python main.py
 ```
 
-The application presents a vehicle selection menu, then displays the chosen
-vehicle configuration, measured-mile result, peak speed, total run time,
-distance travelled, and telemetry table.
+The application opens the desktop GUI. Use the left navigation to move between
+the campaign dashboard, research, garage, test runs, telemetry, team management,
+records, and historical challenges. No additional GUI package installation is
+required.
 
 ## Historical Records
 
@@ -109,11 +116,11 @@ average speed. The most recent records are displayed after each run.
 
 ## Project Files
 
-- `main.py` creates the example vehicle and runs the simulation.
+- `main.py` launches the desktop GUI.
 - `management.py` stores campaign funds and completed-run progression.
 - `research.py` defines the engine technology tree and research prerequisites.
 - `reliability.py` resolves engine failure risk and trackside repairs.
-- `cars.py` contains selectable vehicle definitions and the command-line menu.
+- `cars.py` contains the selectable prebuilt vehicle definitions.
 - `tracks.py` contains selectable track definitions and surface conditions.
 - `records.py` saves and displays the persistent historical records table.
 - `vehicle.py` defines the `Vehicle` class and its engineering properties.
@@ -146,23 +153,13 @@ The current catalogue contains:
 	gearbox with a `2.0` final drive, weak mechanical drum brakes, `Cd=0.75`, and
 	`1.9 m^2` frontal area. Its prototype gearbox efficiency is set to 85%.
 
-Run `python main.py` and choose `1`, `2`, `3`, `4`, `5`, `6`, or `7` from the vehicle menu. Each menu
-selection creates a fresh vehicle, gearbox, and brake system for the run.
-
-When `Blue Bird 1927` is selected, a second menu offers the available Napier
-Lion variants. Each variant supplies its own power, torque, RPM limit, mass,
-reliability, configuration, displacement, and era.
-
-When the 1931 Campbell-Napier-Railton Blue Bird is selected, the player can
-also choose its Napier Lion variant and gearbox. Its defaults are the Napier
-Lion XI and Railton 3-Speed LSR.
-
-The track menu currently offers Bonneville Salt Flats, Brooklands, Pendine
-Sands, Daytona Beach, Black Rock Desert, and Doncaster Test Track. Track
-length, measured-mile position, altitude, temperature, air density, and surface
-friction are stored as track properties. The simulation currently uses track
-length, measured-mile position, and friction; altitude, temperature, and air
-density are recorded for the future engine and aerodynamic models.
+Build custom cars from unlocked chassis, engines, transmissions, and historically
+available brakes in the Garage. The builder assigns a vehicle name automatically;
+garage vehicles can be tuned, upgraded, and selected for campaign test runs.
+Choose the test venue from the available track buttons. Track length,
+measured-mile position, altitude, temperature, air density, and surface friction
+remain stored on each track; the simulation uses track length, measured-mile
+position, friction, and air density.
 
 ## Vehicle Properties
 

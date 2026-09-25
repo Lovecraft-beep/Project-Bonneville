@@ -878,29 +878,9 @@ def run_engineering_test_facility():
 
 
 def main():
-    print("LSR Simulator")
+    from ui.app import launch
 
-    while True:
-        print("\n=== PROJECT BONNEVILLE ===")
-        print("1. Career Mode")
-        print("2. Engineering Test Facility")
-        print("3. Historical Challenges")
-        print("4. Historical Encyclopedia")
-        print("5. Exit")
-
-        choice = input("Choose a mode: ").strip()
-        if choice == "1":
-            run_career_mode()
-        elif choice == "2":
-            run_engineering_test_facility()
-        elif choice == "3":
-            run_historical_challenges()
-        elif choice == "4":
-            run_encyclopedia()
-        elif choice == "5":
-            break
-        else:
-            print("Invalid choice.")
+    launch()
 
 
 if __name__ == "__main__":
