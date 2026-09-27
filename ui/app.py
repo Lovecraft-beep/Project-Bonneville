@@ -83,6 +83,7 @@ class BonnevilleApp(tk.Tk):
         self.last_vehicle = None
         self.last_track = None
         self.last_run_note = "No test run recorded this session."
+        self.last_record_message = None
 
         self.sidebar = tk.Frame(self, bg=INK, width=220)
         self.sidebar.pack(side="left", fill="y")
@@ -704,6 +705,7 @@ class BonnevilleApp(tk.Tk):
         self.last_vehicle = vehicle
         self.last_track = track
         self.last_run_note = "Engineering facility / sandbox result. The campaign was not changed."
+        self.last_record_message = None
         self.show_page("Telemetry")
 
     def choose_track_for_vehicle(self, entry, record_attempt=False):
@@ -718,7 +720,7 @@ class BonnevilleApp(tk.Tk):
         self.page_title(page, "Track operations", "Select a venue", f"Vehicle: {entry.vehicle_name}. Available tracks follow the campaign year.")
         for track in available_tracks(self.campaign.current_year).values():
             vehicle = build_vehicle_from_garage_entry(entry)
-            cost = calculate_run_cost(vehicle, track)
+            cost = calculate_run_cost(track)
             self.action_button(page, f"{track.name}  /  {track.length_miles:g} mi  /  friction {track.friction_factor:.2f}  /  estimated GBP {cost:,.0f}", lambda venue=track: self.execute_run(entry, venue, record_attempt))
         self.action_button(page, "BACK", lambda: self.show_page("Test Runs"))
 
@@ -747,7 +749,7 @@ class BonnevilleApp(tk.Tk):
 
     def execute_run(self, entry, track, record_attempt=False):
         vehicle = build_vehicle_from_garage_entry(entry)
-        cost = calculate_run_cost(vehicle, track)
+        cost = calculate_run_cost(track)
         if cost > self.campaign.team.cash:
             messagebox.showerror("Insufficient funds", f"This run costs GBP {cost:,.0f}; the campaign has GBP {self.campaign.team.cash:,.0f}.", parent=self)
             return
@@ -769,6 +771,7 @@ class BonnevilleApp(tk.Tk):
             sponsor_reliability_bonus=self.campaign.sponsorship.reliability_bonus,
         )
         append_run_log(vehicle, track, result, outcome=outcome)
+        self.last_record_message = None
         record_target = (
             next_historical_target(
                 self.campaign.current_year,
@@ -784,7 +787,10 @@ class BonnevilleApp(tk.Tk):
             complete_run(self.campaign, cost, result.measured_mile_speed_mph, is_record_attempt=record_attempt)
             self.last_run_note = f"Completed. Measured mile {result.measured_mile_speed_mph:.1f} mph; peak {result.peak_speed_mph:.1f} mph."
             if record_target and result.measured_mile_speed_mph >= record_target.speed_mph:
-                self.last_run_note += f" Historical target beaten: {record_target.vehicle}."
+                self.last_record_message = (
+                    f"{record_target.year} {record_target.vehicle} benchmark beaten "
+                    f"at {result.measured_mile_speed_mph:.1f} mph."
+                )
             save_record(create_record(vehicle, track, result, self.campaign))
         self.advance_campaign_turn(days=7)
         save_campaign(self.campaign)
@@ -801,12 +807,55 @@ class BonnevilleApp(tk.Tk):
             return
         result = self.last_result
         self.page_title(page, f"{self.last_vehicle.name}  /  {self.last_track.name}", "Run telemetry", self.last_run_note)
+        if self.last_record_message:
+            notice = tk.Frame(page, bg=PANEL, padx=14, pady=10)
+            notice.pack(fill="x", pady=(0, 12))
+            tk.Label(
+                notice,
+                text="RECORD BEATEN",
+                bg=PANEL,
+                fg=LIME,
+                font=(FONT, 10, "bold"),
+            ).pack(anchor="w")
+            tk.Label(
+                notice,
+                text=self.last_record_message,
+                bg=PANEL,
+                fg=PAPER,
+                font=(FONT, 10),
+                wraplength=1000,
+                justify="left",
+            ).pack(anchor="w", pady=(3, 0))
         metrics = tk.Frame(page, bg=INK)
         metrics.pack(fill="x", pady=(0, 10))
         for label, value, sub in (("Measured mile", f"{result.measured_mile_speed_mph:.1f} mph", f"{result.measured_mile_time_seconds:.1f} s"), ("Peak speed", f"{result.peak_speed_mph:.1f} mph", f"{result.total_time_seconds:.1f} s total"), ("Average acceleration", f"{result.average_acceleration_g:.3f} G", f"{result.gear_change_count} gear changes"), ("Brake temperature", f"{result.maximum_brake_temperature_c:.0f} C", f"{result.wheelspin_event_count} wheelspin events")):
             self.card(metrics, label, value, sub).pack(side="left", fill="both", expand=True, padx=(0, 8))
         self.section(page, "Speed / time")
-        self.draw_graph(page, [(sample.time_seconds, sample.speed_mph) for sample in result.telemetry], "Speed (mph)", ACCENT)
+        measured_mile_markers = []
+        for distance, label in (
+            (self.last_track.measured_mile_start, "MILE ENTRY"),
+            (self.last_track.measured_mile_start + 1.0, "MILE EXIT"),
+        ):
+            for previous, sample in zip(result.telemetry, result.telemetry[1:]):
+                if previous.distance_miles <= distance <= sample.distance_miles:
+                    distance_span = sample.distance_miles - previous.distance_miles
+                    fraction = (
+                        (distance - previous.distance_miles) / distance_span
+                        if distance_span
+                        else 0.0
+                    )
+                    marker_time = previous.time_seconds + fraction * (
+                        sample.time_seconds - previous.time_seconds
+                    )
+                    measured_mile_markers.append((marker_time, label))
+                    break
+        self.draw_graph(
+            page,
+            [(sample.time_seconds, sample.speed_mph) for sample in result.telemetry],
+            "Speed (mph)",
+            ACCENT,
+            vertical_markers=measured_mile_markers,
+        )
         self.section(page, "Acceleration / time")
         self.draw_graph(
             page,
@@ -820,6 +869,7 @@ class BonnevilleApp(tk.Tk):
             ],
             secondary_label="Engine RPM",
             secondary_color=ACCENT,
+            vertical_markers=measured_mile_markers,
         )
         self.action_button(page, "RUN ANOTHER TEST", lambda: self.show_page("Test Runs"), True)
 
@@ -833,10 +883,12 @@ class BonnevilleApp(tk.Tk):
         secondary_values=None,
         secondary_label="",
         secondary_color=ACCENT,
+        vertical_markers=None,
     ):
         canvas = tk.Canvas(parent, bg=PANEL, height=220, highlightthickness=0)
         canvas.pack(fill="x", pady=(0, 6))
         secondary_values = secondary_values or []
+        vertical_markers = vertical_markers or []
 
         def paint(_event=None):
             canvas.delete("all")
@@ -889,6 +941,17 @@ class BonnevilleApp(tk.Tk):
             if secondary_values:
                 canvas.create_line(right, top, right, bottom, fill=secondary_color)
             canvas.create_line(left, bottom, right, bottom, fill=MUTED)
+            for index, (marker_time, marker_label) in enumerate(vertical_markers):
+                x = left + (marker_time / x_max if x_max else 0) * (right - left)
+                canvas.create_line(x, top, x, bottom, fill=LIME, dash=(4, 3))
+                canvas.create_text(
+                    x + 4,
+                    top + 3 + (index % 2) * 14,
+                    text=marker_label,
+                    fill=LIME,
+                    anchor="nw",
+                    font=(FONT, 8, "bold"),
+                )
             canvas.create_text(left, height - 13, text="0 s", fill=MUTED, anchor="w", font=(FONT, 8))
             canvas.create_text(right, height - 13, text=f"{x_max:.0f} s", fill=MUTED, anchor="e", font=(FONT, 8))
             points = []
@@ -1011,6 +1074,7 @@ class BonnevilleApp(tk.Tk):
         self.last_result = result
         self.last_vehicle = vehicle
         self.last_track = challenge.track
+        self.last_record_message = None
         if result.measured_mile_speed_mph >= challenge.target_speed_mph:
             self.last_run_note = f"Challenge complete. Target {challenge.target_speed_mph:.1f} mph beaten."
         else:

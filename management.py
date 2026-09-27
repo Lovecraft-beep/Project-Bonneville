@@ -220,13 +220,9 @@ class CampaignState:
         return max(0, self.team.engineers - self.allocated_engineers)
 
 
-def calculate_run_cost(vehicle, track):
-    """Return the total setup cost for a vehicle and track combination."""
-    return round(
-        vehicle.engine.purchase_cost_gbp
-        + vehicle.gearbox.cost_gbp
-        + track.event_cost_gbp
-    )
+def calculate_run_cost(track):
+    """Return the venue cost for one run."""
+    return track.event_cost_gbp
 
 
 def load_campaign(path=CAMPAIGN_FILE):
@@ -292,15 +288,33 @@ def complete_run(
         campaign.best_measured_mile_speed_mph,
         measured_mile_speed_mph,
     )
-    campaign.team.reputation = round(
-        campaign.team.reputation + (2.0 if is_new_record else 1.0), 2
-    )
+    reputation_gain = 2.0 if is_new_record else 1.0
+    newly_completed_record_ids = []
     if is_record_attempt:
         target = next_historical_target(
             campaign.current_year, campaign.completed_historical_record_ids
         )
         if target and target_completed(target, measured_mile_speed_mph):
-            campaign.completed_historical_record_ids.append(target.record_id)
+            completed_ids = set(campaign.completed_historical_record_ids)
+            newly_completed_record_ids = [
+                record_id
+                for record_id in record_ids_achieved_by_speed(
+                    measured_mile_speed_mph
+                )
+                if record_id not in completed_ids
+            ]
+            campaign.completed_historical_record_ids.extend(
+                newly_completed_record_ids
+            )
+            reputation_gain += len(newly_completed_record_ids)
+            campaign.world.headlines.append(
+                f"RECORD BEATEN: {campaign.team.name} exceeds the {target.year} "
+                f"{target.vehicle} mark at {measured_mile_speed_mph:.1f} mph."
+            )
+            del campaign.world.headlines[:-8]
+    campaign.team.reputation = round(
+        campaign.team.reputation + reputation_gain, 2
+    )
 
 
 def complete_failed_run(campaign, run_cost_gbp):

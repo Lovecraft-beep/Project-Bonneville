@@ -34,6 +34,7 @@ from management import (
     Team,
     advance_turn,
     build_vehicle,
+    calculate_run_cost,
     complete_run,
     hire_engineer,
     load_campaign,
@@ -56,7 +57,7 @@ from research import (
 from reliability import calculate_failure_probability
 from simulation import run_simulation
 from sponsors import SPONSOR_CATALOG
-from tracks import BONNEVILLE_SALT_FLATS, available_tracks
+from tracks import BONNEVILLE_SALT_FLATS, PUBLIC_ROADS, available_tracks
 from vehicle_designer import (
     build_vehicle_from_garage_entry,
     apply_engine_tune,
@@ -71,6 +72,11 @@ def complete_engineering_project(campaign, branch, technology_id):
 # A measured-mile speed above this is a sign of a bug (e.g. the "measured
 # mile never reached" divide-by-zero regression), not a legitimately fast car.
 IMPLAUSIBLE_SPEED_MPH = 2_000.0
+
+
+class RunCostTests(unittest.TestCase):
+    def test_public_road_run_cost_is_venue_fee_only(self):
+        self.assertEqual(calculate_run_cost(PUBLIC_ROADS), 200)
 
 
 class EngineTuningTests(unittest.TestCase):
@@ -250,6 +256,32 @@ class HistoricalChallengeRegressionTests(unittest.TestCase):
             campaign.completed_historical_record_ids,
             ["jeantaud_1898"],
         )
+        self.assertIn("RECORD BEATEN:", campaign.world.headlines[-1])
+        self.assertEqual(campaign.team.reputation, 3.0)
+
+    def test_fast_record_attempt_skips_all_targets_at_or_below_speed(self):
+        campaign = CampaignState(current_year=1898)
+        speed = HISTORICAL_TARGETS[5].speed_mph
+
+        complete_run(campaign, 0.0, speed, is_record_attempt=True)
+
+        self.assertEqual(
+            campaign.completed_historical_record_ids,
+            [
+                target.record_id
+                for target in HISTORICAL_TARGETS
+                if target.speed_mph <= speed
+            ],
+        )
+        self.assertEqual(
+            campaign.team.reputation,
+            2.0
+            + len(campaign.completed_historical_record_ids),
+        )
+        next_target = next_historical_target(
+            campaign.current_year, campaign.completed_historical_record_ids
+        )
+        self.assertGreater(next_target.speed_mph, speed)
 
     def test_early_campaign_catalogs_reflect_historical_limits(self):
         self.assertEqual(
