@@ -20,6 +20,7 @@ class TechnologyNode:
     drag_reduction: float = 0.0
     cooling_penalty: float = 0.0
     reputation_bonus: float = 0.0
+    turns_required: int = 3
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,10 @@ def _tier_cost_gbp(era_index, tier_index):
 
 def _tier_engineers_required(era_index, tier_index):
     return min(6, 1 + era_index + tier_index // 2)
+
+
+def _tier_turns_required(era_index, tier_index):
+    return 3 + era_index + tier_index // 2
 
 
 AERODYNAMICS_DETAILS = {
@@ -385,6 +390,7 @@ def _build_trees(era_definitions):
                     chassis_prerequisites,
                     cost_gbp,
                     engineers_required,
+                    turns_required=_tier_turns_required(era_index, tier_index),
                 )
             )
             previous_chassis_id = chassis_id
@@ -418,6 +424,7 @@ def _build_trees(era_definitions):
                     engine_prerequisites,
                     cost_gbp,
                     engineers_required,
+                    turns_required=_tier_turns_required(era_index, chassis_index),
                 )
             )
             previous_engine_id = engine_id
@@ -472,6 +479,11 @@ def _build_branch_tree(era_definitions, branch_key):
                     drag_reduction=drag_reduction,
                     cooling_penalty=cooling_penalty,
                     reputation_bonus=reputation_bonus,
+                    turns_required=(
+                        3
+                        if era_index == 0
+                        else _tier_turns_required(era_index, chassis_index)
+                    ),
                 )
             )
             previous_id = technology_id
@@ -535,6 +547,7 @@ GEARBOX_TECHNOLOGY_TREE = (
         ("computer_optimised_spaceframe",),
         35_000.0,
         4,
+        turns_required=5,
     ),
 )
 

@@ -1,6 +1,6 @@
 """Brake system definitions for Project Bonneville."""
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -167,23 +167,3 @@ def available_brakes(current_year=None):
     if current_year is None:
         return BRAKE_CATALOG
     return tuple(brake for brake in BRAKE_CATALOG if brake.introduced_year <= current_year)
-
-
-def select_brakes(current_brakes=None, current_year=None):
-    print("\n=== SELECT BRAKES ===")
-    brake_choices = available_brakes(current_year)
-    for number, brakes in enumerate(brake_choices, start=1):
-        marker = "* " if current_brakes and brakes.name == current_brakes.name else "  "
-        print(
-            f"{number}. {marker}{brakes.name} ({brakes.mass_kg:,.0f} kg, "
-            f"GBP {brakes.cost_gbp:,.0f}, {brakes.efficiency:.0%} efficiency, "
-            f"{brakes.max_braking_g}g max)"
-        )
-
-    choice = input("Choose a brake system: ").strip()
-    try:
-        template = brake_choices[int(choice) - 1]
-    except (ValueError, IndexError):
-        template = brake_choices[0]
-        print(f"Invalid choice. Using {template.name}.")
-    return replace(template)

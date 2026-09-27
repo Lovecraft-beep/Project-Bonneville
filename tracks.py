@@ -150,16 +150,3 @@ def available_tracks(current_year=None):
         for choice, track in AVAILABLE_TRACKS.items()
         if track.introduced_year <= current_year
     }
-
-
-def select_track(current_year=None):
-    print("\n=== SELECT TRACK ===")
-    track_choices = available_tracks(current_year)
-    for choice, track in track_choices.items():
-        print(f"{choice}. {track.name}")
-
-    choice = input("Choose a track: ").strip()
-    if choice not in track_choices:
-        choice = next(iter(track_choices))
-        print(f"Invalid choice. Using {track_choices[choice].name}.")
-    return track_choices[choice]

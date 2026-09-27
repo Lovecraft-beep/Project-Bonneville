@@ -66,8 +66,7 @@ class ResearchState:
     def has_engine_technology(self, technology_id):
         return technology_id in self.engine_technology
 
-    def add_engine_technology(self, technology_id):
-        """Record a technology once its research action is implemented."""
+    def _complete_engine_technology(self, technology_id):
         if technology_id not in ENGINE_TECHNOLOGY_BY_ID:
             raise ValueError(f"unknown engine technology: {technology_id}")
         if technology_id not in self.engine_technology:
@@ -80,7 +79,7 @@ class ResearchState:
     def has_chassis_technology(self, technology_id):
         return technology_id in self.chassis_technology
 
-    def add_chassis_technology(self, technology_id):
+    def _complete_chassis_technology(self, technology_id):
         if technology_id not in CHASSIS_TECHNOLOGY_BY_ID:
             raise ValueError(f"unknown chassis technology: {technology_id}")
         if technology_id not in self.chassis_technology:
@@ -89,7 +88,7 @@ class ResearchState:
     def has_aerodynamics_technology(self, technology_id):
         return technology_id in self.aerodynamics_technology
 
-    def add_aerodynamics_technology(self, technology_id):
+    def _complete_aerodynamics_technology(self, technology_id):
         if technology_id not in AERODYNAMICS_TECHNOLOGY_BY_ID:
             raise ValueError(f"unknown aerodynamics technology: {technology_id}")
         if technology_id not in self.aerodynamics_technology:
@@ -98,7 +97,7 @@ class ResearchState:
     def has_tyre_technology(self, technology_id):
         return technology_id in self.tyre_technology
 
-    def add_tyre_technology(self, technology_id):
+    def _complete_tyre_technology(self, technology_id):
         if technology_id not in TYRE_TECHNOLOGY_BY_ID:
             raise ValueError(f"unknown tyre technology: {technology_id}")
         if technology_id not in self.tyre_technology:
@@ -107,7 +106,7 @@ class ResearchState:
     def has_brake_technology(self, technology_id):
         return technology_id in self.brake_technology
 
-    def add_brake_technology(self, technology_id):
+    def _complete_brake_technology(self, technology_id):
         if technology_id not in BRAKE_TECHNOLOGY_BY_ID:
             raise ValueError(f"unknown brake technology: {technology_id}")
         if technology_id not in self.brake_technology:
@@ -116,7 +115,7 @@ class ResearchState:
     def has_gearbox_technology(self, technology_id):
         return technology_id in self.gearbox_technology
 
-    def add_gearbox_technology(self, technology_id):
+    def _complete_gearbox_technology(self, technology_id):
         if technology_id not in GEARBOX_TECHNOLOGY_BY_ID:
             raise ValueError(f"unknown gearbox technology: {technology_id}")
         if technology_id not in self.gearbox_technology:
@@ -176,9 +175,21 @@ class Garage:
 
 
 @dataclass
+class EngineeringProject:
+    """Research work in progress, with its staff allocated until completion."""
+
+    branch: str
+    technology_id: str
+    turns_total: int
+    turns_remaining: int
+    engineers_required: int
+
+
+@dataclass
 class CampaignState:
     team: Team = field(default_factory=Team)
     research: ResearchState = field(default_factory=ResearchState)
+    engineering_projects: list[EngineeringProject] = field(default_factory=list)
     sponsorship: SponsorshipState = field(default_factory=SponsorshipState)
     garage: Garage = field(default_factory=Garage)
     campaign_id: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -199,6 +210,14 @@ class CampaignState:
     @funds_gbp.setter
     def funds_gbp(self, value):
         self.team.cash = value
+
+    @property
+    def allocated_engineers(self):
+        return sum(project.engineers_required for project in self.engineering_projects)
+
+    @property
+    def available_engineers(self):
+        return max(0, self.team.engineers - self.allocated_engineers)
 
 
 def calculate_run_cost(vehicle, track):
@@ -221,6 +240,10 @@ def load_campaign(path=CAMPAIGN_FILE):
     if "team" in data:
         data["team"] = Team(**data["team"])
         data["research"] = ResearchState(**data.get("research", {}))
+        data["engineering_projects"] = [
+            EngineeringProject(**project)
+            for project in data.get("engineering_projects", [])
+        ]
         data["sponsorship"] = SponsorshipState(**data.get("sponsorship", {}))
         garage_data = data.get("garage", {})
         data["garage"] = Garage(
@@ -299,8 +322,111 @@ def advance_turn(campaign, days=365):
     elapsed_days = campaign.current_day_of_year - 1 + days
     campaign.current_year += elapsed_days // 365
     campaign.current_day_of_year = elapsed_days % 365 + 1
+    completed_projects = []
+    for project in campaign.engineering_projects:
+        project.turns_remaining -= 1
+        if project.turns_remaining <= 0:
+            _complete_engineering_project(campaign, project)
+            completed_projects.append(project.technology_id)
+    if completed_projects:
+        campaign.engineering_projects = [
+            project
+            for project in campaign.engineering_projects
+            if project.technology_id not in completed_projects
+        ]
     if campaign.current_year != previous_year:
         advance_world(campaign)
+    return tuple(completed_projects)
+
+
+_ENGINEERING_PROJECT_BRANCHES = {
+    "engine": (
+        ENGINE_TECHNOLOGY_BY_ID,
+        "engine_technology",
+        "_complete_engine_technology",
+        ("engine_technology", "chassis_technology"),
+    ),
+    "chassis": (
+        CHASSIS_TECHNOLOGY_BY_ID,
+        "chassis_technology",
+        "_complete_chassis_technology",
+        ("chassis_technology", "aerodynamics_technology"),
+    ),
+    "aerodynamics": (
+        AERODYNAMICS_TECHNOLOGY_BY_ID,
+        "aerodynamics_technology",
+        "_complete_aerodynamics_technology",
+        ("aerodynamics_technology", "chassis_technology"),
+    ),
+    "tyre": (
+        TYRE_TECHNOLOGY_BY_ID,
+        "tyre_technology",
+        "_complete_tyre_technology",
+        ("tyre_technology", "chassis_technology"),
+    ),
+    "brake": (
+        BRAKE_TECHNOLOGY_BY_ID,
+        "brake_technology",
+        "_complete_brake_technology",
+        ("brake_technology", "chassis_technology"),
+    ),
+    "gearbox": (
+        GEARBOX_TECHNOLOGY_BY_ID,
+        "gearbox_technology",
+        "_complete_gearbox_technology",
+        ("gearbox_technology", "chassis_technology"),
+    ),
+}
+
+
+def start_engineering_project(campaign, branch, technology_id):
+    """Fund a technology project and reserve its required engineering staff."""
+    branch = branch.lower()
+    branch_data = _ENGINEERING_PROJECT_BRANCHES.get(branch)
+    if branch_data is None:
+        raise ValueError(f"unknown engineering branch: {branch}")
+
+    technology_by_id, researched_attribute, _, prerequisite_attributes = branch_data
+    technology = technology_by_id.get(technology_id)
+    if technology is None:
+        raise ValueError(f"unknown technology: {technology_id}")
+
+    researched = getattr(campaign.research, researched_attribute)
+    if technology_id in researched:
+        raise ValueError(f"{technology.name} has already been researched")
+    if any(
+        project.branch == branch and project.technology_id == technology_id
+        for project in campaign.engineering_projects
+    ):
+        raise ValueError(f"{technology.name} is already in progress")
+
+    available_prerequisites = set()
+    for attribute in prerequisite_attributes:
+        available_prerequisites.update(getattr(campaign.research, attribute))
+    if not set(technology.prerequisites).issubset(available_prerequisites):
+        raise ValueError(f"prerequisites not met for {technology.name}")
+    if campaign.team.cash < technology.cost_gbp:
+        raise ValueError("insufficient funds for this engineering project")
+    if campaign.available_engineers < technology.engineers_required:
+        raise ValueError("not enough unassigned engineers for this project")
+
+    turns_required = max(1, technology.turns_required)
+    project = EngineeringProject(
+        branch=branch,
+        technology_id=technology_id,
+        turns_total=turns_required,
+        turns_remaining=turns_required,
+        engineers_required=technology.engineers_required,
+    )
+    campaign.team.cash = round(campaign.team.cash - technology.cost_gbp, 2)
+    campaign.engineering_projects.append(project)
+    return project
+
+
+def _complete_engineering_project(campaign, project):
+    """Apply a finished project through the normal research-state API."""
+    _, _, add_method, _ = _ENGINEERING_PROJECT_BRANCHES[project.branch]
+    getattr(campaign.research, add_method)(project.technology_id)
 
 
 def sign_sponsor(campaign, sponsor_id):
@@ -355,110 +481,6 @@ def upgrade_workshop(campaign):
 
     campaign.team.cash = round(campaign.team.cash - cost_gbp, 2)
     campaign.team.workshop_level += 1
-
-
-def research_engine_technology(campaign, technology_id):
-    """Spend cash and engineer time to unlock an engine technology."""
-    technology = ENGINE_TECHNOLOGY_BY_ID.get(technology_id)
-    if technology is None:
-        raise ValueError(f"unknown engine technology: {technology_id}")
-    if campaign.research.has_engine_technology(technology_id):
-        raise ValueError(f"{technology.name} has already been researched")
-    researched = set(campaign.research.engine_technology) | set(
-        campaign.research.chassis_technology
-    )
-    if not set(technology.prerequisites).issubset(researched):
-        raise ValueError(
-            f"chassis or engine prerequisites not met for {technology.name}"
-        )
-    if campaign.team.cash < technology.cost_gbp:
-        raise ValueError("insufficient funds for this research project")
-    if campaign.team.engineers < technology.engineers_required:
-        raise ValueError("not enough engineers available for this research project")
-
-    campaign.team.cash = round(campaign.team.cash - technology.cost_gbp, 2)
-    campaign.research.add_engine_technology(technology_id)
-
-
-def research_chassis_technology(campaign, technology_id):
-    """Spend cash and engineer time to unlock a chassis technology."""
-    technology = CHASSIS_TECHNOLOGY_BY_ID.get(technology_id)
-    if technology is None:
-        raise ValueError(f"unknown chassis technology: {technology_id}")
-    if campaign.research.has_chassis_technology(technology_id):
-        raise ValueError(f"{technology.name} has already been researched")
-    researched = set(campaign.research.chassis_technology) | set(
-        campaign.research.aerodynamics_technology
-    )
-    if not set(technology.prerequisites).issubset(researched):
-        raise ValueError(f"prerequisites not met for {technology.name}")
-    if campaign.team.cash < technology.cost_gbp:
-        raise ValueError("insufficient funds for this research project")
-    if campaign.team.engineers < technology.engineers_required:
-        raise ValueError("not enough engineers available for this research project")
-
-    campaign.team.cash = round(campaign.team.cash - technology.cost_gbp, 2)
-    campaign.research.add_chassis_technology(technology_id)
-
-
-def _research_branch_technology(campaign, technology_id, tree_by_id, researched, add):
-    technology = tree_by_id.get(technology_id)
-    if technology is None:
-        raise ValueError(f"unknown technology: {technology_id}")
-    if technology_id in researched:
-        raise ValueError(f"{technology.name} has already been researched")
-    available_research = set(researched) | set(campaign.research.chassis_technology)
-    if not set(technology.prerequisites).issubset(available_research):
-        raise ValueError(
-            f"chassis or branch prerequisites not met for {technology.name}"
-        )
-    if campaign.team.cash < technology.cost_gbp:
-        raise ValueError("insufficient funds for this research project")
-    if campaign.team.engineers < technology.engineers_required:
-        raise ValueError("not enough engineers available for this research project")
-
-    campaign.team.cash = round(campaign.team.cash - technology.cost_gbp, 2)
-    add(technology_id)
-
-
-def research_aerodynamics_technology(campaign, technology_id):
-    _research_branch_technology(
-        campaign,
-        technology_id,
-        AERODYNAMICS_TECHNOLOGY_BY_ID,
-        campaign.research.aerodynamics_technology,
-        campaign.research.add_aerodynamics_technology,
-    )
-
-
-def research_tyre_technology(campaign, technology_id):
-    _research_branch_technology(
-        campaign,
-        technology_id,
-        TYRE_TECHNOLOGY_BY_ID,
-        campaign.research.tyre_technology,
-        campaign.research.add_tyre_technology,
-    )
-
-
-def research_brake_technology(campaign, technology_id):
-    _research_branch_technology(
-        campaign,
-        technology_id,
-        BRAKE_TECHNOLOGY_BY_ID,
-        campaign.research.brake_technology,
-        campaign.research.add_brake_technology,
-    )
-
-
-def research_gearbox_technology(campaign, technology_id):
-    _research_branch_technology(
-        campaign,
-        technology_id,
-        GEARBOX_TECHNOLOGY_BY_ID,
-        campaign.research.gearbox_technology,
-        campaign.research.add_gearbox_technology,
-    )
 
 
 def build_vehicle(campaign, garage_entry, cost_gbp, vehicle=None):

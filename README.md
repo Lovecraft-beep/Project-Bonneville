@@ -62,16 +62,18 @@ reputation, engineers, mechanics, and workshop level. These values are ready
 to support future hiring, sponsorship, workshop upgrades, and engineering
 constraints without coupling them to the physics simulation.
 
-The first research tree is `Engine Technology`, beginning with the `Basic
-Engines` era. Its initial nodes are `Multi Cylinder`, `Aluminium Pistons`,
-`Supercharging`, `Fuel Injection`, and `Aircraft Engine Conversion`. Research
-state is persisted with the campaign; `Basic Engines` is the first available
-research project and the five child technologies require it as a prerequisite.
+Research is managed through multi-turn engineering projects. Starting a project
+spends its cost and reserves its required engineers; it advances on every
+campaign turn and unlocks only when its duration is complete. Opening projects
+such as `Wind Deflector` require three turns. Active projects and their remaining
+time are saved with the campaign, and assigned engineers become available again
+at completion. The research screen shows cost, staffing, duration, prerequisites,
+and current progress before a project is started.
 
-The campaign now has an annual turn structure. Each launch currently acts as
-one turn: the team reviews its state, performs a test run, pays the run cost,
-and advances to the next year. Research, hiring, workshop upgrades, and other
-management actions can become alternative turn actions as they are added.
+The campaign uses strategic turns. Management actions advance the year, while a
+test run advances seven days. Active engineering projects progress whenever a
+turn advances, and the dashboard also allows a turn to pass without spending
+campaign funds.
 
 Test runs now include named failure risks: `Misfire`, `Oil leak`, `Gear
 failure`, `Tyre burst`, `Brake fade`, and `Steering vibration`. Failure
@@ -129,7 +131,8 @@ average speed. The most recent records are displayed after each run.
 	telemetry result types.
 - `gearbox.py` defines gear ratios, final drive, efficiency, and shift behaviour.
 - `brakes.py` defines brake systems, heat buildup, efficiency, and fade.
-- `vision.md` describes the longer-term direction of the project.
+- `ui/app.py` contains the button-driven desktop application.
+- `Docs/vision.md` describes the longer-term direction of the project.
 
 ## Available Vehicles
 

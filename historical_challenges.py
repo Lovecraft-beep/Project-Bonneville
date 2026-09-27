@@ -70,15 +70,10 @@ CHALLENGES = (
 )
 
 
-def attempt_challenge(challenge):
-    """Simulate a challenge's historical vehicle/track and compare to its target."""
+def simulate_challenge(challenge):
+    """Return a challenge vehicle and its simulated result."""
     vehicle = challenge.create_vehicle()
     track = challenge.track
-    vehicle.display()
-    print(f"Track: {track.name}")
-    print(f"Target measured-mile speed: {challenge.target_speed_mph:.1f} mph")
-
-    print("\nRunning simulation...")
     result = run_simulation(
         vehicle,
         track_miles=track.length_miles,
@@ -86,39 +81,4 @@ def attempt_challenge(challenge):
         track_friction_factor=track.friction_factor,
         air_density_kg_m3=track.air_density_kg_m3,
     )
-
-    print(f"\nMeasured Mile Speed: {result.measured_mile_speed_mph} mph")
-    print(f"Peak Speed: {result.peak_speed_mph} mph")
-    if result.measured_mile_speed_mph >= challenge.target_speed_mph:
-        print("Challenge complete! You matched or beat the historical record.")
-    else:
-        shortfall = challenge.target_speed_mph - result.measured_mile_speed_mph
-        print(f"Not quite: {shortfall:.1f} mph short of the historical record.")
-
-
-def run_historical_challenges():
-    """Present the challenge menu and run whichever the player picks."""
-    print("\n=== HISTORICAL CHALLENGES ===")
-    while True:
-        print("\nAvailable challenges:")
-        for number, challenge in enumerate(CHALLENGES, start=1):
-            print(
-                f"{number}. {challenge.name} "
-                f"(target {challenge.target_speed_mph:.1f} mph)"
-            )
-        back_choice = str(len(CHALLENGES) + 1)
-        print(f"{back_choice}. Back to Main Menu")
-
-        choice = input("Choose a challenge: ").strip()
-        if choice == back_choice:
-            break
-
-        try:
-            challenge = CHALLENGES[int(choice) - 1]
-        except (ValueError, IndexError):
-            print("Invalid choice.")
-            continue
-
-        print(f"\n=== {challenge.name} ===")
-        print(challenge.description)
-        attempt_challenge(challenge)
+    return vehicle, result

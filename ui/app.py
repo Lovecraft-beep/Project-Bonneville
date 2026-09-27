@@ -14,10 +14,11 @@ from gearbox import (
     DIRECT_DRIVE,
     PREBUILT_GEARBOXES,
     TRANSMISSION_CATALOG,
+    adjust_gearbox_ratio,
     optimize_gearbox_for_engine,
     recommended_transmission,
 )
-from historical_challenges import CHALLENGES
+from historical_challenges import CHALLENGES, simulate_challenge
 from historical_records import next_historical_target
 from management import (
     advance_turn,
@@ -29,15 +30,10 @@ from management import (
     hire_engineer,
     hire_mechanic,
     load_campaign,
-    research_aerodynamics_technology,
-    research_brake_technology,
-    research_chassis_technology,
-    research_engine_technology,
-    research_gearbox_technology,
-    research_tyre_technology,
     reset_campaign,
     save_campaign,
     sign_sponsor,
+    start_engineering_project,
     upgrade_workshop,
 )
 from records import create_record, load_records, save_record
@@ -49,6 +45,7 @@ from research import (
     ENGINE_TECHNOLOGY_TREE,
     GEARBOX_TECHNOLOGY_TREE,
     TYRE_TECHNOLOGY_TREE,
+    TECHNOLOGY_NAME_BY_ID,
     aerodynamics_effects,
 )
 from simulation import run_simulation
@@ -292,7 +289,7 @@ class BonnevilleApp(tk.Tk):
         values = (
             ("Available funds", f"GBP {self.campaign.team.cash:,.0f}", f"{self.campaign.team.reputation:.1f} reputation"),
             ("Best measured mile", f"{self.campaign.best_measured_mile_speed_mph:.1f} mph", "Campaign record"),
-            ("Engineering team", str(self.campaign.team.engineers), f"{self.campaign.team.mechanics} mechanics"),
+            ("Engineering team", f"{self.campaign.available_engineers} available", f"{self.campaign.allocated_engineers} allocated / {self.campaign.team.engineers} engineers"),
             ("Workshop", f"LEVEL {self.campaign.team.workshop_level}", f"{len(self.campaign.garage.vehicles)} vehicles in garage"),
         )
         for label, value, sub in values:
@@ -309,6 +306,18 @@ class BonnevilleApp(tk.Tk):
         self.action_button(left, "Prepare a test run", lambda: self.show_page("Test Runs"), True)
         self.action_button(left, "Design a vehicle", self.start_vehicle_builder)
         self.action_button(left, "Open research tree", lambda: self.show_page("Research"))
+        self.action_button(left, "Advance turn / save money", self.advance_save_money)
+        if self.campaign.engineering_projects:
+            self.section(page, "Engineering projects in progress")
+            for project in self.campaign.engineering_projects:
+                progress = project.turns_total - project.turns_remaining
+                tk.Label(
+                    page,
+                    text=f"{TECHNOLOGY_NAME_BY_ID[project.technology_id]}  /  {progress} of {project.turns_total} turns  /  {project.engineers_required} engineer(s)",
+                    bg=INK,
+                    fg=LIME,
+                    font=(FONT, 10, "bold"),
+                ).pack(anchor="w", pady=3)
         self.section(right, "Campaign objective")
         if target:
             gap = max(0.0, target.speed_mph - self.campaign.best_measured_mile_speed_mph)
@@ -325,7 +334,24 @@ class BonnevilleApp(tk.Tk):
 
     def render_research(self):
         page = self.scroll_area()
-        self.page_title(page, "Research & development", "Technology tree", "Select a branch, then fund any available project. Costs, staffing requirements, prerequisites, and turn advancement use the campaign rules.")
+        self.page_title(page, "Research & development", "Engineering projects", "Fund a project to reserve its engineers. It advances whenever the campaign moves to its next turn and unlocks only when its schedule is complete.")
+        tk.Label(
+            page,
+            text=f"Engineers available: {self.campaign.available_engineers} of {self.campaign.team.engineers}  /  GBP {self.campaign.team.cash:,.0f} available",
+            bg=INK,
+            fg=LIME,
+            font=(FONT, 10, "bold"),
+        ).pack(anchor="w", pady=(0, 12))
+        if self.campaign.engineering_projects:
+            self.section(page, "Active projects")
+            for project in self.campaign.engineering_projects:
+                progress = project.turns_total - project.turns_remaining
+                remaining = project.turns_remaining
+                technology_name = TECHNOLOGY_NAME_BY_ID[project.technology_id]
+                frame = tk.Frame(page, bg=PANEL, padx=14, pady=10)
+                frame.pack(fill="x", pady=3)
+                tk.Label(frame, text=technology_name, bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 14, "bold")).pack(side="left")
+                tk.Label(frame, text=f"{progress}/{project.turns_total} turns  /  {remaining} remaining  /  {project.engineers_required} engineer(s)", bg=PANEL, fg=LIME, font=(FONT, 9, "bold")).pack(side="right")
         tabs = tk.Frame(page, bg=INK)
         tabs.pack(fill="x", pady=(0, 10))
         for branch in ("Engine", "Chassis", "Aerodynamics", "Gearbox", "Tyres", "Brakes"):
@@ -344,24 +370,29 @@ class BonnevilleApp(tk.Tk):
 
     def _research_data(self):
         branches = {
-            "Engine": (ENGINE_TECHNOLOGY_TREE, self.campaign.research.engine_technology, self.campaign.research.chassis_technology, research_engine_technology),
-            "Chassis": (CHASSIS_TECHNOLOGY_TREE, self.campaign.research.chassis_technology, self.campaign.research.aerodynamics_technology, research_chassis_technology),
-            "Aerodynamics": (AERODYNAMICS_TECHNOLOGY_TREE, self.campaign.research.aerodynamics_technology, self.campaign.research.chassis_technology, research_aerodynamics_technology),
-            "Gearbox": (GEARBOX_TECHNOLOGY_TREE, self.campaign.research.gearbox_technology, self.campaign.research.chassis_technology, research_gearbox_technology),
-            "Tyres": (TYRE_TECHNOLOGY_TREE, self.campaign.research.tyre_technology, self.campaign.research.chassis_technology, research_tyre_technology),
-            "Brakes": (BRAKE_TECHNOLOGY_TREE, self.campaign.research.brake_technology, self.campaign.research.chassis_technology, research_brake_technology),
+            "Engine": (ENGINE_TECHNOLOGY_TREE, self.campaign.research.engine_technology, self.campaign.research.chassis_technology),
+            "Chassis": (CHASSIS_TECHNOLOGY_TREE, self.campaign.research.chassis_technology, self.campaign.research.aerodynamics_technology),
+            "Aerodynamics": (AERODYNAMICS_TECHNOLOGY_TREE, self.campaign.research.aerodynamics_technology, self.campaign.research.chassis_technology),
+            "Gearbox": (GEARBOX_TECHNOLOGY_TREE, self.campaign.research.gearbox_technology, self.campaign.research.chassis_technology),
+            "Tyres": (TYRE_TECHNOLOGY_TREE, self.campaign.research.tyre_technology, self.campaign.research.chassis_technology),
+            "Brakes": (BRAKE_TECHNOLOGY_TREE, self.campaign.research.brake_technology, self.campaign.research.chassis_technology),
         }
         return branches[self.research_branch]
 
     def _render_research_nodes(self, parent):
-        tree, researched, shared_researched, action = self._research_data()
+        tree, researched, shared_researched = self._research_data()
         researched_set = set(researched)
         combined = researched_set | set(shared_researched)
-        ready = [node for node in tree if node.technology_id not in researched_set and set(node.prerequisites).issubset(combined)]
+        active_ids = {
+            project.technology_id
+            for project in self.campaign.engineering_projects
+        }
+        ready = [node for node in tree if node.technology_id not in researched_set and node.technology_id not in active_ids and set(node.prerequisites).issubset(combined)]
         for node in tree:
             is_done = node.technology_id in researched_set
+            project = next((item for item in self.campaign.engineering_projects if item.technology_id == node.technology_id), None)
             is_ready = node in ready
-            status = "COMPLETE" if is_done else "AVAILABLE" if is_ready else "LOCKED"
+            status = "COMPLETE" if is_done else "IN PROGRESS" if project else "AVAILABLE" if is_ready else "LOCKED"
             card = tk.Frame(parent, bg=PANEL, padx=16, pady=13)
             card.pack(fill="x", pady=4)
             row = tk.Frame(card, bg=PANEL)
@@ -370,20 +401,41 @@ class BonnevilleApp(tk.Tk):
             info.pack(side="left", fill="both", expand=True)
             tk.Label(info, text=f"{node.era.upper()}  /  {status}", bg=PANEL, fg=LIME if is_done else ACCENT if is_ready else MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
             tk.Label(info, text=node.name, bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 16, "bold")).pack(anchor="w", pady=(4, 2))
-            tk.Label(info, text=f"GBP {node.cost_gbp:,.0f}    /    {node.engineers_required} engineer(s)\n{node.description or 'Prerequisites: ' + (', '.join(node.prerequisites) or 'None')}", bg=PANEL, fg=MUTED, font=(FONT, 9), wraplength=690, justify="left").pack(anchor="w")
+            tk.Label(info, text=f"Cost: GBP {node.cost_gbp:,.0f}    /    Engineers: {node.engineers_required}    /    Time: {node.turns_required} turns\n{node.description or 'Prerequisites: ' + (', '.join(node.prerequisites) or 'None')}", bg=PANEL, fg=MUTED, font=(FONT, 9), wraplength=690, justify="left").pack(anchor="w")
             if is_ready:
-                tk.Button(row, text="RESEARCH", command=lambda tech=node, fn=action: self.research(tech, fn), bg=ACCENT, fg=INK, activebackground=LIME, relief="flat", borderwidth=0, font=(FONT, 9, "bold"), padx=14, pady=10, cursor="hand2").pack(side="right", padx=(12, 0))
+                tk.Button(row, text="START PROJECT", command=lambda tech=node: self.research(tech), bg=ACCENT, fg=INK, activebackground=LIME, relief="flat", borderwidth=0, font=(FONT, 9, "bold"), padx=14, pady=10, cursor="hand2").pack(side="right", padx=(12, 0))
+            elif project:
+                tk.Label(row, text=f"{project.turns_remaining} TURNS LEFT", bg=PANEL, fg=LIME, font=(FONT, 9, "bold")).pack(side="right", padx=12)
             elif not is_done:
                 tk.Label(row, text="LOCKED", bg=PANEL, fg=MUTED, font=(FONT, 9, "bold")).pack(side="right", padx=12)
 
-    def research(self, technology, action):
+    def research(self, technology):
         try:
-            action(self.campaign, technology.technology_id)
-            advance_turn(self.campaign)
+            start_engineering_project(
+                self.campaign,
+                {"Tyres": "tyre", "Brakes": "brake"}.get(
+                    self.research_branch,
+                    self.research_branch.lower(),
+                ),
+                technology.technology_id,
+            )
+            self.advance_campaign_turn()
             save_campaign(self.campaign)
         except ValueError as exc:
-            messagebox.showerror("Research unavailable", str(exc), parent=self)
+            messagebox.showerror("Project unavailable", str(exc), parent=self)
         self.show_page("Research")
+
+    def advance_campaign_turn(self, days=365):
+        completed = advance_turn(self.campaign, days=days)
+        if completed:
+            names = ", ".join(TECHNOLOGY_NAME_BY_ID[item] for item in completed)
+            messagebox.showinfo("Engineering project complete", f"Research completed: {names}", parent=self)
+        return completed
+
+    def advance_save_money(self):
+        self.advance_campaign_turn()
+        save_campaign(self.campaign)
+        self.show_page("Dashboard")
 
     def render_garage(self):
         page = self.scroll_area()
@@ -514,18 +566,10 @@ class BonnevilleApp(tk.Tk):
 
     def adjust_gearbox_ratio(self, entry, gear_index, delta):
         vehicle = build_vehicle_from_garage_entry(entry)
-        if gear_index is None:
-            ratio = round(vehicle.gearbox.final_drive_ratio + delta, 3)
-            if not 0.5 <= ratio <= 6.0:
-                return
-            entry.gearbox_final_drive = ratio
-        else:
-            ratios = list(vehicle.gearbox.gears)
-            ratio = round(ratios[gear_index] + delta, 3)
-            if not 0.5 <= ratio <= 5.0:
-                return
-            ratios[gear_index] = ratio
-            entry.gearbox_ratios = tuple(ratios)
+        if not adjust_gearbox_ratio(vehicle.gearbox, gear_index, delta):
+            return
+        entry.gearbox_final_drive = vehicle.gearbox.final_drive_ratio
+        entry.gearbox_ratios = tuple(vehicle.gearbox.gears)
         save_campaign(self.campaign)
         self.tune_vehicle_gearbox(entry)
 
@@ -610,7 +654,7 @@ class BonnevilleApp(tk.Tk):
             return
         try:
             build_vehicle(self.campaign, entry, cost, vehicle=vehicle)
-            advance_turn(self.campaign)
+            self.advance_campaign_turn()
             save_campaign(self.campaign)
         except ValueError as exc:
             messagebox.showerror("Unable to build vehicle", str(exc), parent=self)
@@ -742,7 +786,7 @@ class BonnevilleApp(tk.Tk):
             if record_target and result.measured_mile_speed_mph >= record_target.speed_mph:
                 self.last_run_note += f" Historical target beaten: {record_target.vehicle}."
             save_record(create_record(vehicle, track, result, self.campaign))
-        advance_turn(self.campaign, days=7)
+        self.advance_campaign_turn(days=7)
         save_campaign(self.campaign)
         self.last_result = result
         self.last_vehicle = vehicle
@@ -810,7 +854,7 @@ class BonnevilleApp(tk.Tk):
     def render_team(self):
         page = self.scroll_area()
         team = self.campaign.team
-        self.page_title(page, "People & facilities", "Team management", f"{team.engineers} engineers  /  {team.mechanics} mechanics  /  workshop level {team.workshop_level}")
+        self.page_title(page, "People & facilities", "Team management", f"{self.campaign.available_engineers} of {team.engineers} engineers available  /  {self.campaign.allocated_engineers} assigned to projects  /  {team.mechanics} mechanics  /  workshop level {team.workshop_level}")
         self.section(page, "Staffing")
         self.action_button(page, "Hire engineer  /  GBP 8,000  /  advances one turn", lambda: self.team_action(hire_engineer, "Engineer hired"))
         self.action_button(page, "Hire mechanic  /  GBP 5,000  /  advances one turn", lambda: self.team_action(hire_mechanic, "Mechanic hired"))
@@ -834,7 +878,7 @@ class BonnevilleApp(tk.Tk):
     def team_action(self, action, success):
         try:
             action(self.campaign)
-            advance_turn(self.campaign)
+            self.advance_campaign_turn()
             save_campaign(self.campaign)
             self.last_run_note = success
         except ValueError as exc:
@@ -844,7 +888,7 @@ class BonnevilleApp(tk.Tk):
     def sign_sponsor_action(self, sponsor):
         try:
             sign_sponsor(self.campaign, sponsor.sponsor_id)
-            advance_turn(self.campaign)
+            self.advance_campaign_turn()
             save_campaign(self.campaign)
         except ValueError as exc:
             messagebox.showerror("Sponsor unavailable", str(exc), parent=self)
@@ -899,14 +943,7 @@ class BonnevilleApp(tk.Tk):
             tk.Label(page, text=f"{track.name}  /  {track.length_miles:g} mi  /  introduced {track.introduced_year}", bg=INK, fg=PAPER, font=(FONT, 10)).pack(anchor="w", pady=3)
 
     def run_challenge(self, challenge):
-        vehicle = challenge.create_vehicle()
-        result = run_simulation(
-            vehicle,
-            track_miles=challenge.track.length_miles,
-            measured_mile_start=challenge.track.measured_mile_start,
-            track_friction_factor=challenge.track.friction_factor,
-            air_density_kg_m3=challenge.track.air_density_kg_m3,
-        )
+        vehicle, result = simulate_challenge(challenge)
         self.last_result = result
         self.last_vehicle = vehicle
         self.last_track = challenge.track

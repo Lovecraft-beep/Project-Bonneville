@@ -1,6 +1,5 @@
 """Gearbox definitions for Project Bonneville."""
 
-from copy import deepcopy
 from dataclasses import dataclass
 from math import pi
 
@@ -399,36 +398,23 @@ def recommended_transmission(engine):
     return FIVE_SPEED_TRANSMISSION
 
 
-def select_gearbox(engine=None, current_gearbox=None):
-    if engine is not None and engine.torque_curve_type in ("turbojet", "rocket"):
-        print(
-            "\n=== SELECT GEARBOX ===\n"
-            f"{engine.name} is a thrust engine, fitted with Direct Drive "
-            "(no gears to shift)."
-        )
-        return deepcopy(DIRECT_DRIVE)
+def adjust_gearbox_ratio(gearbox, gear_index, change):
+    """Apply a bounded ratio adjustment; None selects the final drive."""
+    if gear_index is None:
+        ratio = round(gearbox.final_drive_ratio + change, 3)
+        if not 0.5 <= ratio <= 6.0:
+            return False
+        gearbox.final_drive = ratio
+        return True
 
-    print("\n=== SELECT GEARBOX ===")
-    for number, gearbox in enumerate(TRANSMISSION_CATALOG, start=1):
-        marker = (
-            "* " if current_gearbox and gearbox.name == current_gearbox.name else "  "
-        )
-        print(
-            f"{number}. {marker}{gearbox.name} ({gearbox.gear_count} gears, "
-            f"{gearbox.mass_kg:,.0f} kg, GBP {gearbox.cost_gbp:,.0f}, "
-            f"{gearbox.efficiency:.0%} efficiency)"
-        )
+    if not 0 <= gear_index < gearbox.gear_count:
+        return False
+    ratios = list(gearbox.gears)
+    ratio = round(ratios[gear_index] + change, 3)
+    if not 0.5 <= ratio <= 5.0:
+        return False
+    ratios[gear_index] = ratio
+    gearbox.gears = tuple(ratios)
+    return True
 
-    default = (
-        recommended_transmission(engine)
-        if engine is not None
-        else THREE_SPEED_TRANSMISSION
-    )
-    choice = input(f"Choose a gearbox (or press Enter for {default.name}): ").strip()
-    if not choice:
-        return deepcopy(default)
-    try:
-        return deepcopy(TRANSMISSION_CATALOG[int(choice) - 1])
-    except (ValueError, IndexError):
-        print(f"Invalid choice. Using {default.name}.")
-        return deepcopy(default)
+

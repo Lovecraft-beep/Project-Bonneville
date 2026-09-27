@@ -12,7 +12,6 @@ from engines import (
 )
 from gearbox import (
     BLUE_BIRD_GEARBOX,
-    BLUE_BIRD_GEARBOXES,
     BRICK_3_SPEED,
     DARRACQ_2_SPEED,
     GOLDEN_ARROW_3_SPEED,
@@ -21,7 +20,6 @@ from gearbox import (
     STANLEY_ROCKET_DIRECT_DRIVE,
 )
 from vehicle import Vehicle
-from vehicle_designer import build_vehicle_from_garage_entry
 
 
 def create_brick_mk1():
@@ -186,67 +184,3 @@ AVAILABLE_CARS = {
     "6": create_stanley_steamer_rocket,
     "7": create_darracq_1905,
 }
-
-
-def select_car(campaign=None, include_prebuilt=True):
-    print("\n=== SELECT VEHICLE ===")
-    if include_prebuilt:
-        for choice, create_vehicle in AVAILABLE_CARS.items():
-            print(f"{choice}. {create_vehicle().name}")
-
-    garage_vehicles = campaign.garage.vehicles if campaign is not None else []
-    garage_choices = {}
-    for offset, entry in enumerate(garage_vehicles):
-        choice_key = str((len(AVAILABLE_CARS) if include_prebuilt else 0) + 1 + offset)
-        garage_choices[choice_key] = entry
-        print(f"{choice_key}. {entry.vehicle_name} (garage)")
-
-    choice = input("Choose a vehicle: ").strip()
-    if choice in garage_choices:
-        return build_vehicle_from_garage_entry(garage_choices[choice])
-    if not include_prebuilt:
-        print("Invalid choice. Career Mode uses garage vehicles only.")
-        return None
-    if choice not in AVAILABLE_CARS:
-        print("Invalid choice. Using Brick Mk1.")
-        choice = "1"
-    if choice == "2":
-        return create_blue_bird_1927(gearbox=select_blue_bird_gearbox())
-    if choice == "4":
-        return create_campbell_napier_railton_blue_bird(
-            gearbox=select_campbell_gearbox()
-        )
-    return AVAILABLE_CARS[choice]()
-
-
-def select_campbell_gearbox():
-    print("\n=== SELECT CAMPBELL BLUE BIRD GEARBOX ===")
-    gearboxes = (RAILTON_3_SPEED_LSR, BLUE_BIRD_GEARBOX)
-    for number, gearbox in enumerate(gearboxes, start=1):
-        print(
-            f"{number}. {gearbox.name} "
-            f"({gearbox.gear_count} gears, {gearbox.efficiency:.0%} efficiency)"
-        )
-
-    choice = input("Choose a gearbox: ").strip()
-    try:
-        return gearboxes[int(choice) - 1]
-    except (ValueError, IndexError):
-        print("Invalid choice. Using Railton 3-Speed LSR.")
-        return RAILTON_3_SPEED_LSR
-
-
-def select_blue_bird_gearbox():
-    print("\n=== SELECT BLUE BIRD GEARBOX ===")
-    for number, gearbox in enumerate(BLUE_BIRD_GEARBOXES, start=1):
-        print(
-            f"{number}. {gearbox.name} "
-            f"({gearbox.gear_count} gears, {gearbox.efficiency:.0%} efficiency)"
-        )
-
-    choice = input("Choose a gearbox: ").strip()
-    try:
-        return BLUE_BIRD_GEARBOXES[int(choice) - 1]
-    except (ValueError, IndexError):
-        print("Invalid choice. Using Blue Bird 3-Speed.")
-        return BLUE_BIRD_GEARBOX

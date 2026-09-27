@@ -335,26 +335,3 @@ def available_engines(researched_technologies):
         for engine in AVAILABLE_ENGINES.values()
         if is_engine_unlocked(engine, researched_technologies)
     )
-
-
-def select_engine(researched_technologies=(), current_engine=None):
-    print("\n=== SELECT ENGINE ===")
-    engine_choices = available_engines(researched_technologies)
-    if not engine_choices:
-        print("No engines are unlocked yet. Using Stanley Rocket Steam Engine.")
-        return STANLEY_STEAM_ENGINE
-
-    for number, engine in enumerate(engine_choices, start=1):
-        marker = "* " if current_engine and engine.name == current_engine.name else "  "
-        print(
-            f"{number}. {marker}{engine.name} ({engine.power_hp} hp, "
-            f"{engine.mass_kg:,.0f} kg, GBP {engine.purchase_cost_gbp:,}, "
-            f"reliability {engine.reliability:.0%})"
-        )
-
-    choice = input("Choose an engine: ").strip()
-    try:
-        return engine_choices[int(choice) - 1]
-    except (ValueError, IndexError):
-        print(f"Invalid choice. Using {engine_choices[0].name}.")
-        return engine_choices[0]

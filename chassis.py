@@ -120,21 +120,3 @@ def available_chassis(researched_technologies):
         for chassis in CHASSIS_CATALOG
         if is_chassis_unlocked(chassis, researched_technologies)
     )
-
-
-def select_chassis(researched_technologies=()):
-    print("\n=== SELECT CHASSIS ===")
-    chassis_choices = available_chassis(researched_technologies)
-    for number, chassis in enumerate(chassis_choices, start=1):
-        print(
-            f"{number}. {chassis.name} ({chassis.mass_kg:,.0f} kg, "
-            f"GBP {chassis.cost_gbp:,.0f})"
-        )
-        print(f"   {chassis.description}")
-
-    choice = input("Choose a chassis: ").strip()
-    try:
-        return chassis_choices[int(choice) - 1]
-    except (ValueError, IndexError):
-        print(f"Invalid choice. Using {chassis_choices[0].name}.")
-        return chassis_choices[0]
