@@ -808,20 +808,46 @@ class BonnevilleApp(tk.Tk):
         self.section(page, "Speed / time")
         self.draw_graph(page, [(sample.time_seconds, sample.speed_mph) for sample in result.telemetry], "Speed (mph)", ACCENT)
         self.section(page, "Acceleration / time")
-        self.draw_graph(page, [(sample.time_seconds, sample.acceleration_g) for sample in result.telemetry], "Acceleration (G)", LIME, include_zero=True)
+        self.draw_graph(
+            page,
+            [(sample.time_seconds, sample.acceleration_g) for sample in result.telemetry],
+            "Acceleration (G)",
+            LIME,
+            include_zero=True,
+            secondary_values=[
+                (sample.time_seconds, sample.engine_rpm)
+                for sample in result.telemetry
+            ],
+            secondary_label="Engine RPM",
+            secondary_color=ACCENT,
+        )
         self.action_button(page, "RUN ANOTHER TEST", lambda: self.show_page("Test Runs"), True)
 
-    def draw_graph(self, parent, values, label, color, include_zero=False):
+    def draw_graph(
+        self,
+        parent,
+        values,
+        label,
+        color,
+        include_zero=False,
+        secondary_values=None,
+        secondary_label="",
+        secondary_color=ACCENT,
+    ):
         canvas = tk.Canvas(parent, bg=PANEL, height=220, highlightthickness=0)
         canvas.pack(fill="x", pady=(0, 6))
+        secondary_values = secondary_values or []
 
         def paint(_event=None):
             canvas.delete("all")
             width = max(canvas.winfo_width(), 500)
             height = max(canvas.winfo_height(), 200)
-            left, right, top, bottom = 58, width - 22, 20, height - 34
+            left = 58
+            right = width - (68 if secondary_values else 22)
+            top, bottom = 20, height - 34
             xs = [point[0] for point in values]
             ys = [point[1] for point in values]
+            xs.extend(point[0] for point in secondary_values)
             x_max = max(xs) if xs else 1.0
             low = min(0.0, min(ys)) if include_zero else 0.0
             high = max(ys) if ys else 1.0
@@ -829,14 +855,39 @@ class BonnevilleApp(tk.Tk):
                 high = max(high, 0.05)
             else:
                 high = max(high, 1.0)
-            span = max(high - low, 1.0)
+            span = max(high - low, 1e-9)
             canvas.create_text(left, 8, text=label, fill=PAPER, anchor="w", font=(FONT, 9, "bold"))
+            secondary_high = max(
+                (point[1] for point in secondary_values), default=1.0
+            )
+            secondary_high = max(secondary_high, 1.0)
+            if secondary_values:
+                canvas.create_text(
+                    right + 8,
+                    8,
+                    text=secondary_label,
+                    fill=secondary_color,
+                    anchor="w",
+                    font=(FONT, 9, "bold"),
+                )
             for index in range(5):
                 fraction = index / 4
                 y = top + fraction * (bottom - top)
                 value = high - fraction * span
                 canvas.create_line(left, y, right, y, fill=LINE)
-                canvas.create_text(left - 8, y, text=f"{value:.0f}" if not include_zero else f"{value:.1f}", fill=MUTED, anchor="e", font=(FONT, 8))
+                canvas.create_text(left - 8, y, text=f"{value:.0f}" if not include_zero else f"{value:.2f}", fill=MUTED, anchor="e", font=(FONT, 8))
+                if secondary_values:
+                    rpm_value = secondary_high * (1.0 - fraction)
+                    canvas.create_text(
+                        right + 8,
+                        y,
+                        text=f"{rpm_value:.0f}",
+                        fill=secondary_color,
+                        anchor="w",
+                        font=(FONT, 8),
+                    )
+            if secondary_values:
+                canvas.create_line(right, top, right, bottom, fill=secondary_color)
             canvas.create_line(left, bottom, right, bottom, fill=MUTED)
             canvas.create_text(left, height - 13, text="0 s", fill=MUTED, anchor="w", font=(FONT, 8))
             canvas.create_text(right, height - 13, text=f"{x_max:.0f} s", fill=MUTED, anchor="e", font=(FONT, 8))
@@ -847,9 +898,22 @@ class BonnevilleApp(tk.Tk):
                 points.extend((x, y))
             if len(points) >= 4:
                 canvas.create_line(*points, fill=color, width=2, smooth=True)
+            secondary_points = []
+            for x_value, y_value in secondary_values:
+                x = left + (x_value / x_max if x_max else 0) * (right - left)
+                y = bottom - (y_value / secondary_high) * (bottom - top)
+                secondary_points.extend((x, y))
+            if len(secondary_points) >= 4:
+                canvas.create_line(
+                    *secondary_points,
+                    fill=secondary_color,
+                    width=2,
+                    smooth=True,
+                )
 
         canvas.bind("<Configure>", paint)
         canvas.after(50, paint)
+        return canvas
 
     def render_team(self):
         page = self.scroll_area()
