@@ -10,14 +10,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import records
 from brakes import BRAKE_BY_NAME
 from brakes import available_brakes
 from cars import AVAILABLE_CARS
 from chassis import CHASSIS_BY_ID
-from diagnostics import diagnose_run
+from diagnostics import create_engineering_report, diagnose_run
 from engines import (
     ALL_ENGINES,
     ENGINE_TUNE_STAGES,
@@ -178,6 +178,136 @@ class ResearchProjectSetupTests(unittest.TestCase):
         self.assertGreater(campaign.team.cash, 0)
 
 class EngineeringDiagnosisTests(unittest.TestCase):
+    def test_campaign_runs_open_debrief_and_failed_runs_do_not_save_records(self):
+        from reliability import MISFIRE, RunOutcome
+        from ui.app import BonnevilleApp
+
+        vehicle = AVAILABLE_CARS["1"]()
+        result = SimpleNamespace(
+            telemetry=[SimpleNamespace(brake_fade=False, gear=2)],
+            wheelspin_event_count=0, average_acceleration_g=0.2,
+            maximum_brake_temperature_c=100.0, peak_speed_mph=112.4,
+            measured_mile_speed_mph=100.0,
+        )
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                app = SimpleNamespace(
+                    campaign=CampaignState(), last_report=None,
+                    show_page=Mock(), advance_campaign_turn=Mock(),
+                )
+                outcome = RunOutcome(0.25, failed, False, MISFIRE if failed else None)
+                with (
+                    patch("ui.app.build_vehicle_from_garage_entry", return_value=vehicle),
+                    patch("ui.app.messagebox.askyesno", return_value=True),
+                    patch("ui.app.run_simulation", return_value=result),
+                    patch("ui.app.resolve_run_failure", return_value=outcome),
+                    patch("ui.app.append_run_log"),
+                    patch("ui.app.save_campaign"),
+                    patch("ui.app.create_record"),
+                    patch("ui.app.save_record") as save_record,
+                ):
+                    BonnevilleApp.execute_run(app, object(), PUBLIC_ROADS)
+                app.show_page.assert_called_once_with("Team Debrief")
+                app.advance_campaign_turn.assert_called_once_with(days=7)
+                self.assertEqual(app.last_report.completed, not failed)
+                self.assertFalse(app.last_run_is_sandbox)
+                self.assertEqual(save_record.call_count, 0 if failed else 1)
+                self.assertIsNone(app.last_record_message)
+
+    def test_facility_run_opens_debrief_without_changing_campaign(self):
+        from ui.app import BonnevilleApp
+
+        app = SimpleNamespace(
+            last_report=None, show_page=Mock(), campaign=CampaignState(),
+        )
+        starting_cash = app.campaign.team.cash
+        with patch("ui.app.run_simulation") as simulate, patch("ui.app.append_run_log"):
+            simulate.return_value = SimpleNamespace(
+                telemetry=[SimpleNamespace(brake_fade=False, gear=2)],
+                wheelspin_event_count=0, average_acceleration_g=0.2,
+                maximum_brake_temperature_c=100.0, peak_speed_mph=112.4,
+                measured_mile_speed_mph=100.0,
+            )
+            BonnevilleApp.run_facility_test(app, AVAILABLE_CARS["1"](), PUBLIC_ROADS)
+        app.show_page.assert_called_once_with("Team Debrief")
+        self.assertTrue(app.last_run_is_sandbox)
+        self.assertIsNotNone(app.last_report)
+        self.assertEqual(app.campaign.team.cash, starting_cash)
+
+    def _report(self, campaign=None, **kwargs):
+        vehicle = AVAILABLE_CARS["1"]()
+        result = SimpleNamespace(
+            telemetry=[SimpleNamespace(brake_fade=False, gear=2)],
+            wheelspin_event_count=0, average_acceleration_g=0.2,
+            maximum_brake_temperature_c=100.0, peak_speed_mph=112.4,
+            measured_mile_speed_mph=100.0,
+        )
+        return create_engineering_report(vehicle, PUBLIC_ROADS, result, campaign, **kwargs)
+
+    def test_report_contains_evidence_and_feasible_opening_research(self):
+        campaign = CampaignState()
+        report = self._report(campaign)
+        self.assertEqual(report.diagnosis.problem, "Aerodynamic drag")
+        self.assertIn("112.4 mph", report.diagnosis.evidence)
+        self.assertIn("Research Wind Deflector", report.recommendations[0])
+        self.assertEqual(report.research_branch, "Aerodynamics")
+        self.assertEqual(len(report.recommendations), 3)
+        self.assertEqual(campaign.engineering_projects, [])
+
+    def test_report_research_advice_tracks_project_and_resource_state(self):
+        campaign = CampaignState()
+        campaign.team.cash = 0
+        self.assertIn("raise GBP", self._report(campaign).recommendations[0])
+        campaign.team.cash = 100_000
+        start_engineering_project(campaign, "aerodynamics", "wind_deflector")
+        self.assertIn("3 turn(s) remaining", self._report(campaign).recommendations[0])
+
+    def test_report_handles_staffing_locked_and_completed_research(self):
+        campaign = CampaignState()
+        campaign.team.engineers = 0
+        self.assertIn("free 1 engineer", self._report(campaign).recommendations[0])
+        campaign.research.aerodynamics_technology = [
+            node.technology_id for node in AERODYNAMICS_TECHNOLOGY_TREE[:3]
+        ]
+        self.assertIn("first research", self._report(campaign).recommendations[0])
+        campaign.research.aerodynamics_technology = [
+            node.technology_id for node in AERODYNAMICS_TECHNOLOGY_TREE
+        ]
+        self.assertIn("installation", self._report(campaign).recommendations[0])
+
+    def test_failed_run_is_not_used_as_a_comparison_baseline(self):
+        from reliability import MISFIRE, RunOutcome
+
+        previous = self._report(outcome=RunOutcome(0.25, True, False, MISFIRE))
+        self.assertIn("No comparable", self._report(previous_report=previous).comparison)
+
+    def test_report_comparison_requires_same_vehicle_and_venue(self):
+        previous = self._report()
+        self.assertIn("+0.0 mph", self._report(previous_report=previous).comparison)
+        from dataclasses import replace
+
+        for other in (replace(previous, track_name="Other venue"), replace(previous, vehicle_name="Other car")):
+            self.assertIn("No comparable", self._report(previous_report=other).comparison)
+
+    def test_failed_report_overrides_performance_and_record_readiness(self):
+        from reliability import GEAR_FAILURE, RunOutcome
+
+        outcome = RunOutcome(0.25, True, False, GEAR_FAILURE)
+        report = self._report(CampaignState(), outcome=outcome, previous_report=self._report())
+        self.assertFalse(report.completed)
+        self.assertEqual(report.diagnosis.problem, "Gear failure")
+        self.assertEqual(report.research_branch, "Gearbox")
+        self.assertIn("Workshop repair", report.diagnosis.evidence)
+        self.assertIn("not a valid", report.comparison)
+        self.assertIn("No record credited", report.target_assessment)
+
+    def test_test_pace_does_not_claim_an_official_record(self):
+        target = SimpleNamespace(year=1898, vehicle="Benchmark", speed_mph=90.0)
+        test_report = self._report(CampaignState(), target=target)
+        self.assertIn("Schedule an official", test_report.target_assessment)
+        record_report = self._report(CampaignState(), target=target, is_record_attempt=True)
+        self.assertIn("benchmark beaten", record_report.target_assessment)
+
     def _diagnose(self, vehicle, **result_values):
         result_data = {
             "telemetry": [],

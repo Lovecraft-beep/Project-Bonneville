@@ -96,6 +96,44 @@ The default run uses a 10-mile track with the measured mile beginning at mile
 4. Telemetry is recorded at one-second intervals, with an additional final
 sample when the run ends between intervals.
 
+## Research Progression
+
+Only aerodynamics research is available at the start of a new campaign. Complete
+the opening projects in this order to unlock chassis development:
+
+| Project | Required completed research | Turn advances to complete |
+| --- | --- | --- |
+| Wind Deflector | None | 3 |
+| Wheel Fairings / Spats | Wind Deflector | 3 |
+| Basic Streamlining | Wheel Fairings / Spats | 3 |
+| Carriage Frame | Basic Streamlining | 3 |
+
+Completing Basic Streamlining makes Carriage Frame available to research.
+Completing Carriage Frame then unlocks these projects in their respective tabs:
+
+- **Chassis:** Reinforced Ladder Frame
+- **Engine:** Pioneer Engines
+- **Tyres:** Pneumatic Racing Tyres
+- **Brakes:** Mechanical Drum Brakes
+
+From a fresh campaign, this means nine turn advances before Carriage Frame can
+be started, and another three to complete it and open those branches. Starting a
+project in the desktop UI automatically advances its first turn; test runs and
+the dashboard's **Advance turn / save money** action also progress active
+projects. Research becomes available through completed prerequisites, not merely
+by reaching a particular calendar year.
+
+The starting team has one engineer, and each opening project reserves that
+engineer until completion, so only one can run at a time. Later projects may
+require additional engineers. An unlocked project still needs sufficient funds
+and unassigned engineers before it can start.
+
+Later engine and component research depends on earlier branch technologies and
+specific chassis tiers. For example, Edwardian Giants requires both Pioneer
+Engines and Advanced Edwardian Racing Frame. Gearbox research currently has only
+one project, Computer-Optimised Gear Ratios, which requires Computer-Optimised
+Spaceframe and is therefore unavailable in the opening campaign.
+
 ## Running the Prototype
 
 From the project directory, run:
@@ -108,6 +146,22 @@ The application opens the desktop GUI. Use the left navigation to move between
 the campaign dashboard, research, garage, test runs, telemetry, team management,
 records, and historical challenges. No additional GUI package installation is
 required.
+
+## Engineering Reports
+
+Campaign and engineering-facility tests open the **Team Debrief** screen with a
+Chief Engineer Report: primary concern, telemetry evidence, and three practical
+recommendations. Campaign research advice reflects prerequisites, active
+projects, available engineers, and funding. The screen links to the relevant
+research branch, Garage, telemetry, and the next test or record attempt.
+
+The debrief compares measured-mile speed with the preceding run only when both
+runs completed and used the same vehicle name and venue. It also shows the gap
+to the historical campaign target and distinguishes test pace from an official
+record attempt. Aborted runs prioritize the named failure and label simulated
+speeds as estimates, not valid records. Reports remain available through the
+Team Debrief navigation for the current session; sandbox reports do not change
+the campaign. Reviewing a report spends no funds and advances no time.
 
 ## Historical Records
 

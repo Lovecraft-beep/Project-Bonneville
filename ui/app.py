@@ -8,7 +8,7 @@ from tkinter import messagebox
 from brakes import BRAKE_CATALOG, available_brakes
 from cars import AVAILABLE_CARS
 from chassis import available_chassis
-from diagnostics import append_run_log
+from diagnostics import append_run_log, create_engineering_report
 from engines import AVAILABLE_ENGINES, ENGINE_TUNE_STAGES, available_engines
 from gearbox import (
     DIRECT_DRIVE,
@@ -84,6 +84,8 @@ class BonnevilleApp(tk.Tk):
         self.last_track = None
         self.last_run_note = "No test run recorded this session."
         self.last_record_message = None
+        self.last_report = None
+        self.last_run_is_sandbox = False
 
         self.sidebar = tk.Frame(self, bg=INK, width=220)
         self.sidebar.pack(side="left", fill="y")
@@ -108,7 +110,7 @@ class BonnevilleApp(tk.Tk):
             pady=28,
         ).pack(anchor="w")
         tk.Frame(self.sidebar, bg=ACCENT, height=3).pack(fill="x", padx=22, pady=(0, 20))
-        for name in ("Dashboard", "Research", "Garage", "Test Runs", "Test Facility", "Telemetry", "Team", "Records", "Challenges", "Encyclopedia"):
+        for name in ("Dashboard", "Research", "Garage", "Test Runs", "Test Facility", "Team Debrief", "Telemetry", "Team", "Records", "Challenges", "Encyclopedia"):
             self.nav_button(name)
         tk.Label(
             self.sidebar,
@@ -129,7 +131,7 @@ class BonnevilleApp(tk.Tk):
             command=lambda: self.show_page(name),
             anchor="w",
             padx=22,
-            pady=12,
+            pady=8,
             bg=PANEL if active else INK,
             fg=LIME if active else MUTED,
             activebackground=PANEL_LIGHT,
@@ -180,6 +182,7 @@ class BonnevilleApp(tk.Tk):
             "Garage": self.render_garage,
             "Test Runs": self.render_test_runs,
             "Test Facility": self.render_test_facility,
+            "Team Debrief": self.render_team_debrief,
             "Telemetry": self.render_telemetry,
             "Team": self.render_team,
             "Records": self.render_records,
@@ -701,12 +704,16 @@ class BonnevilleApp(tk.Tk):
             air_density_kg_m3=track.air_density_kg_m3,
         )
         append_run_log(vehicle, track, result)
+        self.last_report = create_engineering_report(
+            vehicle, track, result, previous_report=self.last_report
+        )
+        self.last_run_is_sandbox = True
         self.last_result = result
         self.last_vehicle = vehicle
         self.last_track = track
         self.last_run_note = "Engineering facility / sandbox result. The campaign was not changed."
         self.last_record_message = None
-        self.show_page("Telemetry")
+        self.show_page("Team Debrief")
 
     def choose_track_for_vehicle(self, entry, record_attempt=False):
         self.selected_vehicle = entry
@@ -772,13 +779,9 @@ class BonnevilleApp(tk.Tk):
         )
         append_run_log(vehicle, track, result, outcome=outcome)
         self.last_record_message = None
-        record_target = (
-            next_historical_target(
-                self.campaign.current_year,
-                self.campaign.completed_historical_record_ids,
-            )
-            if record_attempt
-            else None
+        record_target = next_historical_target(
+            self.campaign.current_year,
+            self.campaign.completed_historical_record_ids,
         )
         if outcome.failed:
             complete_failed_run(self.campaign, cost)
@@ -786,7 +789,7 @@ class BonnevilleApp(tk.Tk):
         else:
             complete_run(self.campaign, cost, result.measured_mile_speed_mph, is_record_attempt=record_attempt)
             self.last_run_note = f"Completed. Measured mile {result.measured_mile_speed_mph:.1f} mph; peak {result.peak_speed_mph:.1f} mph."
-            if record_target and result.measured_mile_speed_mph >= record_target.speed_mph:
+            if record_attempt and record_target and result.measured_mile_speed_mph >= record_target.speed_mph:
                 self.last_record_message = (
                     f"{record_target.year} {record_target.vehicle} benchmark beaten "
                     f"at {result.measured_mile_speed_mph:.1f} mph."
@@ -794,10 +797,63 @@ class BonnevilleApp(tk.Tk):
             save_record(create_record(vehicle, track, result, self.campaign))
         self.advance_campaign_turn(days=7)
         save_campaign(self.campaign)
+        self.last_report = create_engineering_report(
+            vehicle, track, result, self.campaign, outcome,
+            previous_report=self.last_report, target=record_target,
+            is_record_attempt=record_attempt,
+        )
+        self.last_run_is_sandbox = False
         self.last_result = result
         self.last_vehicle = vehicle
         self.last_track = track
-        self.show_page("Telemetry")
+        self.show_page("Team Debrief")
+
+    def render_team_debrief(self):
+        page = self.scroll_area()
+        self.page_title(page, "Racing department / team debrief", "Chief Engineer Report")
+        if self.last_report is None:
+            tk.Label(page, text="No run to review.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w", pady=16)
+            self.action_button(page, "PREPARE A TEST RUN", lambda: self.show_page("Test Runs"), True)
+            self.action_button(page, "OPEN TEST FACILITY", lambda: self.show_page("Test Facility"))
+            return
+        report = self.last_report
+
+        def report_text(text, color=PAPER, font=(FONT, 11)):
+            label = tk.Label(page, text=text, bg=INK, fg=color, font=font, justify="left", anchor="w", wraplength=1000)
+            label.pack(fill="x", pady=(4, 8))
+            label.bind("<Configure>", lambda event: label.configure(wraplength=max(1, event.width - 8)))
+
+        report_text(f"Vehicle: {report.vehicle_name}  /  Venue: {report.track_name}", MUTED)
+        report_text(report.run_status, LIME if report.completed else ACCENT, (FONT, 10, "bold"))
+        report_text(self.last_run_note, MUTED)
+        if self.last_record_message:
+            report_text(self.last_record_message, LIME)
+        self.section(page, "Primary concern")
+        report_text(report.diagnosis.problem, ACCENT, (DISPLAY_FONT, 18, "bold"))
+        self.section(page, "Evidence")
+        report_text(report.diagnosis.evidence)
+        result = self.last_result
+        report_text(
+            f"Peak: {result.peak_speed_mph:.1f} mph  /  Measured mile: {result.measured_mile_speed_mph:.1f} mph\n"
+            f"Average acceleration: {result.average_acceleration_g:.3f} G  /  Average deceleration: {result.average_deceleration_g:.3f} G\n"
+            f"Brake temperature: {result.maximum_brake_temperature_c:.0f} C  /  Wheelspin events: {result.wheelspin_event_count}",
+            MUTED,
+        )
+        self.section(page, "Recommendations")
+        for number, recommendation in enumerate(report.recommendations, start=1):
+            report_text(f"{number}. {recommendation}")
+        self.section(page, "Team assessment")
+        report_text(report.comparison, MUTED)
+        report_text(report.target_assessment, LIME if report.completed else ACCENT)
+        self.action_button(page, "VIEW TELEMETRY", lambda: self.show_page("Telemetry"))
+        if self.last_run_is_sandbox:
+            self.action_button(page, "RETURN TO TEST FACILITY", lambda: self.show_page("Test Facility"), True)
+        else:
+            self.action_button(page, f"REVIEW {report.research_branch.upper()} RESEARCH", lambda: self.set_research_branch(report.research_branch), True)
+            self.action_button(page, "MODIFY VEHICLE IN GARAGE", lambda: self.show_page("Garage"))
+            self.action_button(page, "PREPARE NEXT TEST", lambda: self.show_page("Test Runs"))
+            if report.completed and self.campaign.garage.vehicles and next_historical_target(self.campaign.current_year, self.campaign.completed_historical_record_ids):
+                self.action_button(page, "PLAN RECORD ATTEMPT", self.start_record_attempt)
 
     def render_telemetry(self):
         page = self.scroll_area()
@@ -807,6 +863,7 @@ class BonnevilleApp(tk.Tk):
             return
         result = self.last_result
         self.page_title(page, f"{self.last_vehicle.name}  /  {self.last_track.name}", "Run telemetry", self.last_run_note)
+        self.action_button(page, "OPEN TEAM DEBRIEF", lambda: self.show_page("Team Debrief"))
         if self.last_record_message:
             notice = tk.Frame(page, bg=PANEL, padx=14, pady=10)
             notice.pack(fill="x", pady=(0, 12))
@@ -1071,6 +1128,10 @@ class BonnevilleApp(tk.Tk):
 
     def run_challenge(self, challenge):
         vehicle, result = simulate_challenge(challenge)
+        self.last_report = create_engineering_report(
+            vehicle, challenge.track, result, previous_report=self.last_report
+        )
+        self.last_run_is_sandbox = True
         self.last_result = result
         self.last_vehicle = vehicle
         self.last_track = challenge.track

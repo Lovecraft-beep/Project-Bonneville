@@ -5,6 +5,16 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+from research import (
+    AERODYNAMICS_TECHNOLOGY_TREE,
+    BRAKE_TECHNOLOGY_TREE,
+    ENGINE_TECHNOLOGY_TREE,
+    GEARBOX_TECHNOLOGY_TREE,
+    TYRE_TECHNOLOGY_TREE,
+    TECHNOLOGY_NAME_BY_ID,
+    available_branch_technologies,
+)
+
 DIAGNOSTIC_LOG_FILE = Path(__file__).with_name("test_vehicle_diagnostics.log")
 
 
@@ -55,9 +65,124 @@ def diagnose_run(vehicle, result):
 
     return RunDiagnosis(
         "Aerodynamic drag",
-        f"Peak speed plateaued at {result.peak_speed_mph:.1f} mph.",
+        f"Peak speed reached {result.peak_speed_mph:.1f} mph. "
+        "Review aerodynamic drag before the next test.",
         "chassis",
         "chassis and aerodynamic technology",
+    )
+
+
+@dataclass(frozen=True)
+class EngineeringReport:
+    vehicle_name: str
+    track_name: str
+    diagnosis: RunDiagnosis
+    recommendations: tuple[str, ...]
+    research_branch: str
+    run_status: str
+    completed: bool
+    measured_mile_speed_mph: float
+    comparison: str
+    target_assessment: str
+
+
+def _research_recommendation(campaign, branch, tree):
+    if campaign is None:
+        return f"Explore {branch.lower()} research in the campaign workshop."
+    attribute = {"Tyres": "tyre", "Brakes": "brake"}.get(branch, branch.lower())
+    researched = getattr(campaign.research, f"{attribute}_technology")
+    node = next((item for item in tree if item.technology_id not in researched), None)
+    if node is None:
+        return f"Review installation of your researched {branch.lower()} technology in the Garage."
+    project = next(
+        (item for item in campaign.engineering_projects if item.technology_id == node.technology_id),
+        None,
+    )
+    if project is not None:
+        return f"Continue {node.name}: {project.turns_remaining} turn(s) remaining."
+    available = available_branch_technologies(
+        tree, researched, campaign.research.chassis_technology
+    )
+    if node not in available:
+        known = set(researched) | set(campaign.research.chassis_technology)
+        missing = ", ".join(
+            TECHNOLOGY_NAME_BY_ID[item] for item in node.prerequisites if item not in known
+        )
+        return f"Work toward {node.name}; first research {missing}."
+    blockers = []
+    if campaign.team.cash < node.cost_gbp:
+        blockers.append(f"raise GBP {node.cost_gbp - campaign.team.cash:,.0f} more")
+    if campaign.available_engineers < node.engineers_required:
+        blockers.append(f"free {node.engineers_required - campaign.available_engineers} engineer(s)")
+    requirements = f"GBP {node.cost_gbp:,.0f}, {node.engineers_required} engineer(s), {node.turns_required} turns"
+    if blockers:
+        return f"Prepare {node.name} ({requirements}): {'; '.join(blockers)}."
+    return f"Research {node.name} ({requirements})."
+
+
+def create_engineering_report(
+    vehicle, track, result, campaign=None, outcome=None, previous_report=None,
+    target=None, is_record_attempt=False,
+):
+    """Build a read-only debrief from one run and its campaign context."""
+    diagnosis = diagnose_run(vehicle, result)
+    failed = outcome is not None and outcome.failed
+    if failed:
+        failure_name = outcome.failure_type.name if outcome.failure_type else "Mechanical failure"
+        diagnosis = RunDiagnosis(
+            failure_name,
+            f"Run aborted. Failure probability was {outcome.failure_probability:.1%}. "
+            + ("Trackside repair was possible." if outcome.repaired else "Workshop repair is required."),
+            {
+                "gear_failure": "gearbox", "tyre_burst": "tyres",
+                "brake_fade": "brakes", "steering_vibration": "chassis",
+            }.get(outcome.failure_type.failure_id if outcome.failure_type else "", "engine"),
+            "reliability",
+        )
+    plans = {
+        "brakes": ("Brakes", BRAKE_TECHNOLOGY_TREE, "Fit stronger brakes in the Garage.", "Retest braking on the same venue before a record attempt."),
+        "tyres": ("Tyres", TYRE_TECHNOLOGY_TREE, "Review tyre grip when selecting a chassis.", "Use a higher-grip venue for the next test."),
+        "gearbox": ("Gearbox", GEARBOX_TECHNOLOGY_TREE, "Adjust gear ratios and final drive in the Garage.", "Retest and check that telemetry records upshifts."),
+        "engine": ("Engine", ENGINE_TECHNOLOGY_TREE, "Review engine choice and tuning in the Garage.", "Retest acceleration on the same venue before a record attempt."),
+        "chassis": ("Aerodynamics", AERODYNAMICS_TECHNOLOGY_TREE, "Design a vehicle with a lower-drag chassis.", "Review a more powerful engine, including its reliability trade-off."),
+    }
+    branch, tree, modification, next_test = plans[diagnosis.recommended_component]
+    recommendations = (
+        _research_recommendation(campaign, branch, tree), modification, next_test,
+    )
+    if failed:
+        recommendations = (
+            "Inspect the failed component and review team mechanics and workshop support.",
+            recommendations[0], "Complete a successful test before another record attempt.",
+        )
+    comparison = "No comparable completed run at this venue yet."
+    if failed:
+        comparison = "Aborted run: simulated speeds are not a valid performance comparison."
+    elif (
+        previous_report is not None and previous_report.completed
+        and previous_report.vehicle_name == vehicle.name
+        and previous_report.track_name == track.name
+    ):
+        change = result.measured_mile_speed_mph - previous_report.measured_mile_speed_mph
+        comparison = f"Measured mile {change:+.1f} mph versus the previous completed run here."
+    target_assessment = "Sandbox test: no campaign record is at stake."
+    if campaign is not None:
+        target_assessment = "All historical campaign targets have been completed."
+        if failed:
+            target_assessment = "No record credited: this run was aborted."
+        elif target is not None:
+            gap = target.speed_mph - result.measured_mile_speed_mph
+            benchmark = f"{target.year} {target.vehicle}: {target.speed_mph:.1f} mph"
+            if gap > 0:
+                target_assessment = f"{gap:.1f} mph short of {benchmark}. Continue development."
+            elif is_record_attempt:
+                target_assessment = f"Historical benchmark beaten: {benchmark}."
+            else:
+                target_assessment = f"Test pace meets {benchmark}. Schedule an official record attempt."
+    return EngineeringReport(
+        vehicle.name, track.name, diagnosis, recommendations, branch,
+        "ABORTED / SIMULATION ESTIMATES ONLY" if failed else "COMPLETED",
+        not failed, result.measured_mile_speed_mph, comparison, target_assessment,
     )
 
 

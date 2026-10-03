@@ -1,27 +1,145 @@
-Markdown
+# Project Bonneville
 
-Project Bonneville
+Project Bonneville is a management and engineering simulation inspired by the history of the world land speed record.
 
-A management and engineering simulation focused on the history of the world land speed record.
+Players begin in the earliest era of motor racing, constructing primitive record cars using limited technology, facilities and funding. Through research, experimentation and record attempts they guide their team across more than a century of technological development, progressing from chain-driven pioneers and giant piston engines to jet, rocket and electric vehicles.
 
-Players begin in the early piston-engine era and progress through increasingly advanced technologies, culminating in modern jet, rocket and electric record vehicles.
+The core gameplay focuses on engineering decision-making. Every vehicle is a compromise between power, mass, aerodynamics, structural strength, reliability, safety and cost. Success comes from understanding these trade-offs better than competing teams and continuously refining designs through testing and analysis.
 
-BeamNG/Unity integration may be used for vehicle validation and record attempts. 
+## Core Pillars
 
-What makes a test run interesting?
+### Engineering First
 
-What information should the player see?
+Project Bonneville is primarily an engineering management game rather than a driving game.
 
-How realistic should the simulation be?
+Players design vehicles by choosing:
 
-What separates a streamliner from a production car?
+- Chassis technologies
+- Engine technologies
+- Fuels and power systems
+- Aerodynamic features
+- Safety systems
+- Materials and construction methods
 
-What makes a record attempt risky?
+Each choice influences performance, reliability, development cost and risk.
 
-Progression: vehicles need eras, technologies, engines, fuels, and unlockable upgrades.
-Engineering decisions: players should choose tradeoffs such as power, mass, drag, stability, reliability, and safety.
-Test runs: the simulation should produce events and telemetry, not only one top-speed number.
-Risk: failures, weather, track conditions, driver skill, and vehicle instability need to affect record attempts.
-Vehicle categories: streamliners and production cars should have different aerodynamic, structural, and regulatory characteristics.
-Historical structure: records, teams, years, locations, and technological milestones should become data rather than hard-coded values.
-External validation: BeamNG/Unity integration should come after the internal simulation has a stable vehicle and test-run model.
+### Learn Through Testing
+
+Vehicle development follows a continuous cycle:
+
+1. Design
+2. Build
+3. Test
+4. Analyse
+5. Improve
+
+Testing is not simply a speed calculation. Runs generate telemetry, engineering feedback and unexpected events that help players understand the strengths and weaknesses of a design.
+
+Players gradually unlock more advanced testing capabilities:
+
+- Road testing
+- Measured mile testing
+- Wind tunnels
+- Materials laboratories
+- Engine dynamometers
+- Simulation facilities
+
+Better facilities provide more accurate information and reduce uncertainty.
+
+### Historical Progression
+
+The game spans multiple technological eras.
+
+Progression is driven by research and engineering breakthroughs rather than arbitrary unlocks.
+
+Major technology domains include:
+
+- Chassis design
+- Aerodynamics
+- Engines
+- Fuels
+- Tyres
+- Materials
+- Stability systems
+- Safety equipment
+
+Historical records, locations, teams and milestones exist as data-driven content that can be expanded without changes to core game systems.
+
+### Risk Creates Excitement
+
+Record attempts should feel dangerous and uncertain.
+
+Potential risks include:
+
+- Mechanical failures
+- Tyre failures
+- Overheating
+- Poor weather
+- Surface conditions
+- Aerodynamic instability
+- Structural weaknesses
+- Driver limitations
+
+Players must decide how much risk they are willing to accept in pursuit of higher speeds.
+
+### Every Run Tells a Story
+
+A successful record attempt is not merely reaching a target speed.
+
+Runs should generate:
+
+- Peak speed
+- Acceleration profiles
+- Stability assessments
+- Mechanical wear
+- Aero observations
+- Driver feedback
+- Engineering discoveries
+- Unexpected incidents
+
+The player's understanding of the vehicle should improve after every test.
+
+## Career Structure
+
+A typical gameplay loop consists of:
+
+- Conducting research
+- Designing upgrades
+- Managing budgets
+- Building vehicles
+- Running tests
+- Analysing results
+- Attempting records
+- Reinvesting rewards into future development
+
+Success unlocks access to more advanced facilities, technologies and engineering opportunities.
+
+## Vehicle Categories
+
+Different categories should encourage fundamentally different engineering approaches.
+
+### Streamliners
+
+- Purpose-built for maximum speed
+- Extreme aerodynamic efficiency
+- Minimal practical constraints
+- Higher engineering complexity
+
+### Production-Based Cars
+
+- Derived from road-going vehicles
+- Regulatory and structural constraints
+- Greater emphasis on optimisation
+- Different record classes and strategies
+
+## Long-Term Vision
+
+Project Bonneville should eventually model the complete engineering journey behind a land speed record programme, from workshop experimentation to world record attempts on locations such as Daytona Beach, Bonneville Salt Flats and Black Rock Desert.
+
+Driving and vehicle validation through Unity integration may be explored in the future, but only after the internal engineering, testing and progression systems are mature and enjoyable in their own right.
+
+## Principle
+
+The player should never win because they clicked the correct upgrade.
+
+The player should win because they understood the engineering problem better than anyone else.
