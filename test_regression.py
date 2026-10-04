@@ -27,13 +27,24 @@ from engines import (
     ENGINE_TUNE_STAGES,
     NAPIER_LION,
     PIONEER_SINGLE_CYLINDER,
+    STANLEY_STEAM_ENGINE,
+    WELCH_HEMI,
+    available_engines,
     next_engine_tune_stage,
     tune_engine,
 )
 from gearbox import PREBUILT_GEARBOXES, TRANSMISSION_CATALOG
 from historical_challenges import CHALLENGES, simulate_challenge
-from historical_records import HISTORICAL_TARGETS, next_historical_target
+from historical_records import (
+    HISTORICAL_TARGETS,
+    next_historical_target,
+    required_record_runs,
+)
 from management import (
+    CampaignState,
+    GarageVehicle,
+    Team,
+    CampaignRecordAttempt,
     CampaignState,
     GarageVehicle,
     Team,
@@ -41,9 +52,13 @@ from management import (
     adjust_vehicle_ratio_trackside,
     build_vehicle,
     calculate_run_cost,
+    calculate_session_run_cost,
     complete_run,
+    end_test_session,
     fit_trackside_tyres,
+    fit_trackside_brakes,
     MAX_TESTS_PER_SESSION,
+    mark_session_venue_paid,
     hire_engineer,
     load_campaign,
     next_vehicle_name,
@@ -65,7 +80,13 @@ from research import (
     available_tyre_technologies,
     current_chassis_era,
 )
-from reliability import calculate_failure_probability
+from reliability import (
+    GEAR_FAILURE,
+    MISFIRE,
+    TYRE_BURST,
+    calculate_failure_probability,
+    resolve_run_failure,
+)
 from simulation import run_simulation
 from sponsors import SPONSOR_CATALOG
 from tracks import BONNEVILLE_SALT_FLATS, PUBLIC_ROADS, available_tracks
@@ -89,6 +110,16 @@ class RunCostTests(unittest.TestCase):
     def test_public_road_run_cost_is_venue_fee_only(self):
         self.assertEqual(calculate_run_cost(PUBLIC_ROADS), 200)
 
+    def test_venue_fee_is_charged_once_per_session(self):
+        campaign = CampaignState()
+        self.assertEqual(calculate_session_run_cost(campaign, PUBLIC_ROADS), 200)
+        mark_session_venue_paid(campaign, PUBLIC_ROADS)
+        self.assertEqual(calculate_session_run_cost(campaign, PUBLIC_ROADS), 0)
+
+        advance_turn(campaign, days=0)
+
+        self.assertEqual(calculate_session_run_cost(campaign, PUBLIC_ROADS), 200)
+
 
 class TestSessionTests(unittest.TestCase):
     def test_eight_hourly_tests_fit_one_session_and_advance_resets_it(self):
@@ -106,6 +137,42 @@ class TestSessionTests(unittest.TestCase):
         advance_turn(campaign, days=0)
 
         self.assertEqual(campaign.tests_this_session, 0)
+
+    def test_ending_session_resets_test_count_and_venue_fees_without_advancing_turn(self):
+        campaign = CampaignState(tests_this_session=5)
+        mark_session_venue_paid(campaign, PUBLIC_ROADS)
+        starting_turn = campaign.turn_number
+
+        end_test_session(campaign)
+
+        self.assertEqual(campaign.tests_this_session, 0)
+        self.assertEqual(campaign.venues_paid_this_session, [])
+        self.assertEqual(campaign.turn_number, starting_turn)
+        self.assertEqual(calculate_session_run_cost(campaign, PUBLIC_ROADS), 200)
+
+    def test_cannot_end_session_during_pending_record_attempt(self):
+        campaign = CampaignState(
+            record_attempt=CampaignRecordAttempt(
+                "target", "Car", "Track", 1924, 2, [200.0]
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "official record attempt"):
+            end_test_session(campaign)
+
+    def test_ui_end_session_saves_and_returns_to_garage(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState(tests_this_session=3)
+        mark_session_venue_paid(campaign, PUBLIC_ROADS)
+        app = SimpleNamespace(campaign=campaign, show_page=Mock())
+
+        with patch("ui.app.save_campaign") as save:
+            BonnevilleApp.end_current_test_session(app)
+
+        self.assertEqual(campaign.tests_this_session, 0)
+        self.assertEqual(campaign.venues_paid_this_session, [])
+        save.assert_called_once_with(campaign)
+        app.show_page.assert_called_once_with("Garage")
 
 
 class VehicleNamingTests(unittest.TestCase):
@@ -240,6 +307,489 @@ class EngineTuningTests(unittest.TestCase):
         )
 
 
+class FailureRepairTests(unittest.TestCase):
+    def _debrief_app(self, repaired, repair_complete=False):
+        return SimpleNamespace(
+            scroll_area=Mock(return_value=Mock()),
+            page_title=Mock(),
+            section=Mock(),
+            action_button=Mock(),
+            show_page=Mock(),
+            repair_failed_run_trackside=Mock(),
+            rerun_failed_test=Mock(),
+            campaign=SimpleNamespace(tests_this_session=1),
+            last_report=SimpleNamespace(
+                vehicle_name="Failure Test",
+                track_name=PUBLIC_ROADS.name,
+                run_status="ABORTED",
+                completed=False,
+                diagnosis=SimpleNamespace(
+                    problem="Mechanical failure", evidence="Failure recorded."
+                ),
+                recommendations=(),
+                comparison="",
+                target_assessment="",
+                research_branch="Engine",
+            ),
+            last_run_note="ABORTED: Mechanical failure.",
+            last_record_message=None,
+            last_run_is_sandbox=False,
+            last_run_outcome=SimpleNamespace(failed=True, repaired=repaired),
+            last_run_repaired=repair_complete,
+            last_run_was_record_attempt=False,
+            last_vehicle_entry=None,
+            last_result=SimpleNamespace(
+                peak_speed_mph=100.0,
+                measured_mile_speed_mph=95.0,
+                average_acceleration_g=0.1,
+                average_deceleration_g=0.1,
+                maximum_brake_temperature_c=100.0,
+                wheelspin_event_count=0,
+            ),
+        )
+
+    def test_minor_failure_can_be_repaired_trackside(self):
+        engine = SimpleNamespace(reliability=0.0)
+        gearbox = SimpleNamespace(reliability=1.0)
+
+        outcome = resolve_run_failure(
+            engine, 250.0, Team(), random_value=0.0, gearbox=gearbox
+        )
+
+        self.assertEqual(outcome.failure_type, MISFIRE)
+        self.assertTrue(outcome.repaired)
+
+    def test_gearbox_failure_requires_return_to_garage(self):
+        engine = SimpleNamespace(reliability=1.0)
+        gearbox = SimpleNamespace(reliability=0.0)
+
+        outcome = resolve_run_failure(
+            engine, 250.0, Team(), random_value=0.01, gearbox=gearbox
+        )
+
+        self.assertEqual(outcome.failure_type, GEAR_FAILURE)
+        self.assertFalse(outcome.repaired)
+
+    def test_tyre_burst_requires_return_to_garage(self):
+        engine = SimpleNamespace(reliability=1.0)
+        gearbox = SimpleNamespace(reliability=1.0)
+        outcome = resolve_run_failure(
+            engine, 250.0, Team(), random_value=0.005, gearbox=gearbox
+        )
+
+        self.assertEqual(outcome.failure_type, TYRE_BURST)
+        self.assertFalse(outcome.repaired)
+
+    def test_minor_fault_repair_unlocks_free_rerun(self):
+        from ui.app import BonnevilleApp
+
+        app = SimpleNamespace(
+            last_run_outcome=SimpleNamespace(failed=True, repaired=True),
+            last_run_repaired=False,
+            last_run_note="ABORTED: Misfire.",
+            last_vehicle_entry=object(),
+            last_track=PUBLIC_ROADS,
+            last_run_was_record_attempt=True,
+            show_page=Mock(),
+            execute_run=Mock(),
+        )
+
+        BonnevilleApp.repair_failed_run_trackside(app)
+        self.assertTrue(app.last_run_repaired)
+        BonnevilleApp.rerun_failed_test(app)
+
+        app.execute_run.assert_called_once_with(
+            app.last_vehicle_entry,
+            PUBLIC_ROADS,
+            record_attempt=True,
+            waive_venue_fee=True,
+        )
+
+    def test_major_failure_blocks_campaign_run(self):
+        from ui.app import BonnevilleApp
+
+        app = SimpleNamespace(garage_return_required=True)
+        with patch("ui.app.messagebox.showerror") as show_error:
+            BonnevilleApp.execute_run(app, object(), PUBLIC_ROADS)
+        show_error.assert_called_once()
+
+    def test_debrief_shows_repair_then_rerun_or_forces_garage(self):
+        from ui.app import BonnevilleApp
+
+        scenarios = (
+            (True, False, ["REPAIR MINOR ISSUE AT TRACKSIDE"]),
+            (True, True, ["RERUN AT NO COST"]),
+            (False, False, ["RETURN TO GARAGE"]),
+        )
+        with patch("ui.app.tk.Label"):
+            for repaired, repair_complete, expected_labels in scenarios:
+                with self.subTest(expected_labels=expected_labels):
+                    app = self._debrief_app(repaired, repair_complete)
+                    BonnevilleApp.render_team_debrief(app)
+                    labels = [
+                        call.args[1]
+                        for call in app.action_button.call_args_list
+                    ]
+                    self.assertEqual(labels, expected_labels)
+
+    def test_repaired_record_failure_keeps_service_and_free_retry_options(self):
+        from ui.app import BonnevilleApp
+
+        attempt = CampaignRecordAttempt(
+            HISTORICAL_TARGETS[0].record_id,
+            "Record Test",
+            PUBLIC_ROADS.name,
+            1924,
+            2,
+            [100.0],
+        )
+        app = self._debrief_app(repaired=True, repair_complete=True)
+        app.campaign.record_attempt = attempt
+        app.last_run_was_record_attempt = True
+
+        with patch("ui.app.tk.Label"):
+            BonnevilleApp.render_team_debrief(app)
+
+        labels = [call.args[1] for call in app.action_button.call_args_list]
+        self.assertEqual(
+            labels,
+            ["RERUN AT NO COST", "TRACKSIDE MODIFICATIONS"],
+        )
+
+
+class RecordAttemptTests(unittest.TestCase):
+    def test_telemetry_footer_routes_record_pass_to_trackside_maintenance(self):
+        from ui.app import BonnevilleApp
+
+        for is_record_attempt, expected_label in (
+            (True, "TRACKSIDE MAINTENANCE"),
+            (False, "RUN ANOTHER TEST"),
+        ):
+            with self.subTest(is_record_attempt=is_record_attempt):
+                app = SimpleNamespace(
+                    scroll_area=Mock(return_value=Mock()),
+                    last_result=SimpleNamespace(
+                        measured_mile_speed_mph=100.0,
+                        measured_mile_time_seconds=30.0,
+                        peak_speed_mph=110.0,
+                        total_time_seconds=60.0,
+                        average_acceleration_g=0.2,
+                        gear_change_count=2,
+                        maximum_brake_temperature_c=100.0,
+                        wheelspin_event_count=0,
+                        telemetry=[],
+                    ),
+                    last_vehicle=SimpleNamespace(name="Record Test"),
+                    last_track=SimpleNamespace(name="Public Roads", measured_mile_start=0.0),
+                    last_run_note="Completed.",
+                    last_record_message=None,
+                    last_run_was_record_attempt=is_record_attempt,
+                    last_run_is_sandbox=False,
+                    last_run_outcome=SimpleNamespace(failed=False),
+                    last_run_repaired=False,
+                    garage_return_required=False,
+                    last_vehicle_entry=object(),
+                    campaign=SimpleNamespace(record_attempt=object() if is_record_attempt else None),
+                    show_page=Mock(),
+                    card=Mock(return_value=Mock()),
+                    section=Mock(),
+                    draw_graph=Mock(),
+                    action_button=Mock(),
+                    page_title=Mock(),
+                )
+                with patch("ui.app.tk.Frame"), patch("ui.app.tk.Label"):
+                    BonnevilleApp.render_telemetry(app)
+
+                labels = [call.args[1] for call in app.action_button.call_args_list]
+                if is_record_attempt:
+                    self.assertEqual(labels[-1], expected_label)
+                else:
+                    self.assertEqual(
+                        labels[-2:],
+                        ["TRACKSIDE MAINTENANCE", "RUN ANOTHER TEST"],
+                    )
+
+
+    def test_record_pass_rules_change_in_1924_and_remain_two_pass_after_1950(self):
+        self.assertEqual(required_record_runs(1895), 1)
+        self.assertEqual(required_record_runs(1923), 1)
+        self.assertEqual(required_record_runs(1924), 2)
+        self.assertEqual(required_record_runs(1950), 2)
+
+    def test_1950_debrief_calls_out_one_hour_turnaround(self):
+        from ui.app import BonnevilleApp
+
+        target = HISTORICAL_TARGETS[0]
+        entry = GarageVehicle(
+            "Record Test",
+            CHASSIS_TECHNOLOGY_TREE[0].technology_id,
+            NAPIER_LION.name,
+            TRANSMISSION_CATALOG[2].name,
+            "1920s mechanical drum brakes",
+        )
+        app = SimpleNamespace(
+            scroll_area=Mock(return_value=Mock()),
+            page_title=Mock(),
+            section=Mock(),
+            action_button=Mock(),
+            show_page=Mock(),
+            resume_record_attempt=Mock(),
+            campaign=CampaignState(
+                current_year=1950,
+                record_attempt=CampaignRecordAttempt(
+                    target.record_id,
+                    entry.vehicle_name,
+                    PUBLIC_ROADS.name,
+                    1950,
+                    2,
+                    [target.speed_mph],
+                ),
+            ),
+            last_report=SimpleNamespace(
+                vehicle_name=entry.vehicle_name,
+                track_name=PUBLIC_ROADS.name,
+                run_status="COMPLETED",
+                completed=True,
+                diagnosis=SimpleNamespace(problem="Test", evidence="Evidence."),
+                recommendations=(),
+                comparison="",
+                target_assessment="",
+                research_branch="Engine",
+            ),
+            last_run_note="Completed.",
+            last_record_message="Outbound pass recorded.",
+            last_run_is_sandbox=False,
+            last_vehicle_entry=None,
+            last_run_outcome=SimpleNamespace(failed=False, repaired=False),
+            last_run_was_record_attempt=True,
+            last_result=SimpleNamespace(
+                peak_speed_mph=120.0,
+                measured_mile_speed_mph=target.speed_mph,
+                average_acceleration_g=0.2,
+                average_deceleration_g=0.2,
+                maximum_brake_temperature_c=100.0,
+                wheelspin_event_count=0,
+            ),
+        )
+
+        with patch("ui.app.tk.Label") as label:
+            BonnevilleApp.render_team_debrief(app)
+
+        displayed_text = [
+            call.kwargs.get("text", "") for call in label.call_args_list
+        ]
+        self.assertTrue(
+            any("one-hour test slot" in text for text in displayed_text)
+        )
+        action_labels = [call.args[1] for call in app.action_button.call_args_list]
+        self.assertIn("START RETURN RUN / OPPOSITE DIRECTION", action_labels)
+
+    def test_1924_attempt_requires_return_and_credits_only_the_average(self):
+        from ui.app import BonnevilleApp
+
+        target = HISTORICAL_TARGETS[0]
+        campaign = CampaignState(current_year=1924)
+        entry = GarageVehicle(
+            "Record Test",
+            CHASSIS_TECHNOLOGY_TREE[0].technology_id,
+            NAPIER_LION.name,
+            TRANSMISSION_CATALOG[2].name,
+            "1920s mechanical drum brakes",
+        )
+        campaign.garage.vehicles.append(entry)
+        vehicle = AVAILABLE_CARS["1"]()
+        outcome = SimpleNamespace(failed=False, repaired=False)
+        report = SimpleNamespace(
+            vehicle_name=entry.vehicle_name,
+            track_name=PUBLIC_ROADS.name,
+            run_status="COMPLETED",
+            completed=True,
+            diagnosis=SimpleNamespace(problem="Test", evidence="Evidence."),
+            recommendations=(),
+            research_branch="Engine",
+            comparison="",
+            target_assessment="",
+        )
+        app = SimpleNamespace(
+            campaign=campaign,
+            garage_return_required=False,
+            last_run_outcome=None,
+            last_run_repaired=False,
+            last_report=None,
+            last_record_message=None,
+            last_run_is_sandbox=False,
+            last_vehicle_entry=None,
+            last_trackside_ratio_adjusted=False,
+            last_track=None,
+            last_run_note="",
+            last_result=None,
+            last_vehicle=None,
+            last_run_was_record_attempt=False,
+            resume_record_attempt=Mock(),
+            show_page=Mock(),
+        )
+        result = SimpleNamespace(
+            peak_speed_mph=120.0,
+            measured_mile_speed_mph=target.speed_mph + 20.0,
+            average_acceleration_g=0.2,
+            average_deceleration_g=0.2,
+            maximum_brake_temperature_c=100.0,
+            wheelspin_event_count=0,
+            telemetry=[],
+        )
+
+        with (
+            patch("ui.app.build_vehicle_from_garage_entry", return_value=vehicle),
+            patch("ui.app.messagebox.askyesno", return_value=True),
+            patch("ui.app.run_simulation", return_value=result),
+            patch("ui.app.resolve_run_failure", return_value=outcome),
+            patch("ui.app.append_run_log"),
+            patch("ui.app.save_campaign"),
+            patch("ui.app.create_record", return_value=object()),
+            patch("ui.app.save_record"),
+            patch("ui.app.create_engineering_report", return_value=report) as make_report,
+        ):
+            BonnevilleApp.execute_run(
+                app,
+                entry,
+                PUBLIC_ROADS,
+                record_attempt=True,
+                record_target=target,
+            )
+
+        self.assertEqual(required_record_runs(1924), 2)
+        self.assertEqual(campaign.completed_historical_record_ids, [])
+        self.assertEqual(campaign.record_attempt.speeds_mph, [result.measured_mile_speed_mph])
+        self.assertTrue(make_report.call_args.kwargs["record_attempt_in_progress"])
+        self.assertTrue(app.last_run_was_record_attempt)
+        with (
+            patch("ui.app.messagebox.showerror") as show_error,
+            patch("ui.app.run_simulation") as simulate,
+        ):
+            BonnevilleApp.execute_run(app, entry, PUBLIC_ROADS)
+        show_error.assert_called_once()
+        simulate.assert_not_called()
+
+        app.last_report = report
+        app.last_run_outcome = outcome
+        app.last_vehicle_entry = None
+        app.last_result = result
+        app.section = Mock()
+        app.action_button = Mock()
+        app.scroll_area = Mock(return_value=Mock())
+        app.page_title = Mock()
+        with patch("ui.app.tk.Label"):
+            BonnevilleApp.render_team_debrief(app)
+        labels = [call.args[1] for call in app.action_button.call_args_list]
+        self.assertIn("START RETURN RUN / OPPOSITE DIRECTION", labels)
+        self.assertNotIn("PREPARE NEXT TEST", labels)
+
+        result.measured_mile_speed_mph = target.speed_mph - 2.0
+        with (
+            patch("ui.app.build_vehicle_from_garage_entry", return_value=vehicle),
+            patch("ui.app.messagebox.askyesno", return_value=True),
+            patch("ui.app.run_simulation", return_value=result),
+            patch("ui.app.resolve_run_failure", return_value=outcome),
+            patch("ui.app.append_run_log"),
+            patch("ui.app.save_campaign"),
+            patch("ui.app.create_record", return_value=object()),
+            patch("ui.app.save_record"),
+            patch("ui.app.create_engineering_report", return_value=report) as make_report,
+        ):
+            BonnevilleApp.execute_run(
+                app,
+                entry,
+                PUBLIC_ROADS,
+                record_attempt=True,
+                record_target=target,
+            )
+
+        self.assertIsNone(campaign.record_attempt)
+        self.assertIn(target.record_id, campaign.completed_historical_record_ids)
+        self.assertIn("Official average", app.last_record_message)
+        self.assertAlmostEqual(
+            make_report.call_args.kwargs["record_attempt_average_mph"],
+            target.speed_mph + 9.0,
+        )
+
+    def test_paired_attempt_cannot_start_with_only_one_slot_left(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState(current_year=1924)
+        campaign.tests_this_session = MAX_TESTS_PER_SESSION - 1
+        app = SimpleNamespace(
+            campaign=campaign,
+            garage_return_required=False,
+            last_run_outcome=None,
+            last_run_repaired=False,
+        )
+        entry = GarageVehicle(
+            "Record Test",
+            CHASSIS_TECHNOLOGY_TREE[0].technology_id,
+            NAPIER_LION.name,
+            TRANSMISSION_CATALOG[2].name,
+            "1920s mechanical drum brakes",
+        )
+
+        with patch("ui.app.messagebox.showerror") as show_error, patch(
+            "ui.app.run_simulation"
+        ) as simulate:
+            BonnevilleApp.execute_run(
+                app,
+                entry,
+                PUBLIC_ROADS,
+                record_attempt=True,
+                record_target=HISTORICAL_TARGETS[0],
+            )
+
+        show_error.assert_called_once()
+        simulate.assert_not_called()
+
+    def test_record_attempt_garage_view_only_offers_service_routes(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState(current_year=1950)
+        entry = GarageVehicle(
+            "Record Test",
+            CHASSIS_TECHNOLOGY_TREE[0].technology_id,
+            NAPIER_LION.name,
+            TRANSMISSION_CATALOG[2].name,
+            "1920s mechanical drum brakes",
+        )
+        campaign.garage.vehicles.append(entry)
+        campaign.record_attempt = CampaignRecordAttempt(
+            HISTORICAL_TARGETS[0].record_id,
+            entry.vehicle_name,
+            PUBLIC_ROADS.name,
+            1950,
+            2,
+            [100.0],
+        )
+        app = BonnevilleApp.__new__(BonnevilleApp)
+        app.campaign = campaign
+        app.show_page = Mock()
+        app.body = Mock()
+        app.page_title = Mock()
+        app.card = Mock(return_value=Mock())
+        app.section = Mock()
+        app.action_button = Mock()
+        scroll_area = Mock()
+        container = Mock()
+        page = Mock()
+        app.body.winfo_children.return_value = [scroll_area]
+        scroll_area.winfo_children.return_value = [container]
+        container.winfo_children.return_value = [page]
+
+        with patch("ui.app.tk.Frame"), patch("ui.app.tk.Label"):
+            BonnevilleApp.open_garage_vehicle(app, entry)
+
+        labels = [call.args[1] for call in app.action_button.call_args_list]
+        self.assertEqual(
+            labels,
+            ["OPEN TRACKSIDE SERVICE", "RETURN TO RECORD ATTEMPT"],
+        )
+
+
 class TracksideServiceTests(unittest.TestCase):
     def _garage_entry(self):
         return GarageVehicle(
@@ -275,6 +825,18 @@ class TracksideServiceTests(unittest.TestCase):
         )
         self.assertEqual(loaded.team.cash, starting_cash - 10.0)
         self.assertEqual(loaded.turn_number, starting_turn)
+
+    def test_trackside_brake_service_costs_five_and_updates_vehicle(self):
+        campaign = CampaignState()
+        entry = self._garage_entry()
+        campaign.garage.vehicles.append(entry)
+        starting_cash = campaign.team.cash
+        fit_trackside_brakes(
+            campaign, entry, "Hydraulic disc brakes", current_year=1950
+        )
+
+        self.assertEqual(entry.brakes_name, "Hydraulic disc brakes")
+        self.assertEqual(campaign.team.cash, starting_cash - 5.0)
 
     def test_mechanic_suggests_lengthening_final_drive_near_redline(self):
         vehicle = AVAILABLE_CARS["1"]()
@@ -339,6 +901,19 @@ class TracksideServiceTests(unittest.TestCase):
         self.assertTrue(any("APPLY SUGGESTION" in label for label in action_labels))
         ratio_steps = {call.kwargs["text"] for call in button.call_args_list}
         self.assertTrue({"-0.1", "+0.1"}.issubset(ratio_steps))
+
+
+class EngineAvailabilityTests(unittest.TestCase):
+    def test_welch_hemi_unlocks_before_stanley_steam_engine(self):
+        pioneer_engines = available_engines(["pioneer_engines"])
+        edwardian_engines = available_engines(
+            ["pioneer_engines", "edwardian_giants"]
+        )
+
+        self.assertIn(WELCH_HEMI, pioneer_engines)
+        self.assertNotIn(STANLEY_STEAM_ENGINE, pioneer_engines)
+        self.assertIn(STANLEY_STEAM_ENGINE, edwardian_engines)
+        self.assertLess(WELCH_HEMI.power_hp, STANLEY_STEAM_ENGINE.power_hp)
 
 
 class PresetVehicleRegressionTests(unittest.TestCase):
@@ -428,6 +1003,9 @@ class EngineeringDiagnosisTests(unittest.TestCase):
             with self.subTest(failed=failed):
                 app = SimpleNamespace(
                     campaign=CampaignState(), last_report=None,
+                    garage_return_required=False,
+                    last_run_outcome=None,
+                    last_run_repaired=False,
                     show_page=Mock(), advance_campaign_turn=Mock(),
                 )
                 outcome = RunOutcome(0.25, failed, False, MISFIRE if failed else None)
@@ -445,6 +1023,9 @@ class EngineeringDiagnosisTests(unittest.TestCase):
                 app.show_page.assert_called_once_with("Team Debrief")
                 app.advance_campaign_turn.assert_not_called()
                 self.assertEqual(app.campaign.tests_this_session, 1)
+                self.assertEqual(
+                    app.campaign.venues_paid_this_session, [PUBLIC_ROADS.name]
+                )
                 self.assertEqual(app.last_report.completed, not failed)
                 self.assertFalse(app.last_run_is_sandbox)
                 self.assertEqual(save_record.call_count, 0 if failed else 1)

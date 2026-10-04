@@ -151,6 +151,7 @@ STANLEY_STEAM_ENGINE = Engine(
     base_cost_gbp=4_000,
     rarity_factor=1.3,
     torque_curve_type="steam",
+    required_technology="edwardian_giants",
 )
 
 

@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from brakes import available_brakes
 from chassis import CHASSIS_BY_ID
 from diagnostics import reset_vehicle_log
 from campaign_world import (
@@ -15,8 +16,10 @@ from campaign_world import (
     create_world_state,
 )
 from historical_records import (
+    average_record_speed,
     next_historical_target,
     record_ids_achieved_by_speed,
+    required_record_runs,
     target_completed,
 )
 from gearbox import AVAILABLE_GEARBOXES, adjust_gearbox_ratio
@@ -182,6 +185,16 @@ class Garage:
 
 
 @dataclass
+class CampaignRecordAttempt:
+    target_id: str
+    vehicle_name: str
+    track_name: str
+    started_year: int
+    required_runs: int
+    speeds_mph: list[float] = field(default_factory=list)
+
+
+@dataclass
 class EngineeringProject:
     """Research work in progress, with its staff allocated until completion."""
 
@@ -199,11 +212,13 @@ class CampaignState:
     engineering_projects: list[EngineeringProject] = field(default_factory=list)
     sponsorship: SponsorshipState = field(default_factory=SponsorshipState)
     garage: Garage = field(default_factory=Garage)
+    record_attempt: CampaignRecordAttempt | None = None
     campaign_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     current_year: int = STARTING_YEAR
     current_day_of_year: int = 1
     turn_number: int = 1
     tests_this_session: int = 0
+    venues_paid_this_session: list[str] = field(default_factory=list)
     completed_runs: int = 0
     failed_runs: int = 0
     best_measured_mile_speed_mph: float = 0.0
@@ -231,6 +246,19 @@ class CampaignState:
 def calculate_run_cost(track):
     """Return the venue cost for one run."""
     return track.event_cost_gbp
+
+
+def calculate_session_run_cost(campaign, track):
+    """Charge a venue fee only the first time a venue is used this session."""
+    if track.name in campaign.venues_paid_this_session:
+        return 0
+    return calculate_run_cost(track)
+
+
+def mark_session_venue_paid(campaign, track):
+    """Record that the current test session has paid to use this venue."""
+    if track.name not in campaign.venues_paid_this_session:
+        campaign.venues_paid_this_session.append(track.name)
 
 
 def next_vehicle_name(campaign):
@@ -282,6 +310,12 @@ def load_campaign(path=CAMPAIGN_FILE):
                 GarageVehicle(**vehicle) for vehicle in garage_data.get("museum", [])
             ],
         )
+        record_attempt_data = data.get("record_attempt")
+        data["record_attempt"] = (
+            CampaignRecordAttempt(**record_attempt_data)
+            if record_attempt_data is not None
+            else None
+        )
         data.setdefault(
             "completed_historical_record_ids",
             record_ids_achieved_by_speed(data.get("best_measured_mile_speed_mph", 0.0)),
@@ -310,7 +344,11 @@ def save_campaign(campaign, path=CAMPAIGN_FILE):
 
 
 def complete_run(
-    campaign, run_cost_gbp, measured_mile_speed_mph, is_record_attempt=False
+    campaign,
+    run_cost_gbp,
+    measured_mile_speed_mph,
+    is_record_attempt=False,
+    record_attempt_average_mph=None,
 ):
     """Charge a completed run and update campaign performance."""
     if run_cost_gbp > campaign.funds_gbp:
@@ -326,15 +364,20 @@ def complete_run(
     reputation_gain = 2.0 if is_new_record else 1.0
     newly_completed_record_ids = []
     if is_record_attempt:
+        record_speed_mph = (
+            measured_mile_speed_mph
+            if record_attempt_average_mph is None
+            else record_attempt_average_mph
+        )
         target = next_historical_target(
             campaign.current_year, campaign.completed_historical_record_ids
         )
-        if target and target_completed(target, measured_mile_speed_mph):
+        if target and target_completed(target, record_speed_mph):
             completed_ids = set(campaign.completed_historical_record_ids)
             newly_completed_record_ids = [
                 record_id
                 for record_id in record_ids_achieved_by_speed(
-                    measured_mile_speed_mph
+                    record_speed_mph
                 )
                 if record_id not in completed_ids
             ]
@@ -344,7 +387,7 @@ def complete_run(
             reputation_gain += len(newly_completed_record_ids)
             campaign.world.headlines.append(
                 f"RECORD BEATEN: {campaign.team.name} exceeds the {target.year} "
-                f"{target.vehicle} mark at {measured_mile_speed_mph:.1f} mph."
+                f"{target.vehicle} mark at {record_speed_mph:.1f} mph."
             )
             del campaign.world.headlines[:-8]
     campaign.team.reputation = round(
@@ -369,6 +412,7 @@ def advance_turn(campaign, days=365):
     )
     campaign.turn_number += 1
     campaign.tests_this_session = 0
+    campaign.venues_paid_this_session = []
     elapsed_days = campaign.current_day_of_year - 1 + days
     campaign.current_year += elapsed_days // 365
     campaign.current_day_of_year = elapsed_days % 365 + 1
@@ -395,6 +439,14 @@ def register_test_run(campaign):
         raise ValueError("test session is full; advance campaign time to start another")
     campaign.tests_this_session += 1
     return campaign.tests_this_session
+
+
+def end_test_session(campaign):
+    """End track operations and clear this session's hourly slots and venue fees."""
+    if campaign.record_attempt is not None:
+        raise ValueError("complete or abandon the official record attempt first")
+    campaign.tests_this_session = 0
+    campaign.venues_paid_this_session.clear()
 
 
 _ENGINEERING_PROJECT_BRANCHES = {
@@ -594,6 +646,21 @@ def fit_trackside_tyres(campaign, garage_entry):
     _charge_trackside_adjustment(campaign)
     garage_entry.tyre_grip_factor = round(replacement_grip, 3)
     return garage_entry.tyre_grip_factor
+
+
+def fit_trackside_brakes(campaign, garage_entry, brakes_name, current_year):
+    """Fit an era-appropriate brake system as low-cost trackside service."""
+    _require_active_garage_vehicle(campaign, garage_entry)
+    if not any(
+        brakes.name == brakes_name
+        for brakes in available_brakes(current_year)
+    ):
+        raise ValueError("brake system is not available in the current era")
+    if garage_entry.brakes_name == brakes_name:
+        raise ValueError("this brake system is already fitted")
+
+    _charge_trackside_adjustment(campaign)
+    garage_entry.brakes_name = brakes_name
 
 
 def retire_vehicle(campaign, garage_entry):

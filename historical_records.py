@@ -50,6 +50,18 @@ def next_historical_target(current_year, completed_record_ids):
     return None
 
 
+def required_record_runs(year):
+    """Return the official pass count under the rules effective that year."""
+    return 1 if year <= 1923 else 2
+
+
+def average_record_speed(speeds_mph):
+    """Return the arithmetic mean speed for a completed record attempt."""
+    if not speeds_mph:
+        raise ValueError("a record attempt needs at least one measured pass")
+    return sum(speeds_mph) / len(speeds_mph)
+
+
 def target_completed(target, measured_mile_speed_mph):
     """Return whether a measured-mile run matches or beats a target."""
     return measured_mile_speed_mph >= target.speed_mph

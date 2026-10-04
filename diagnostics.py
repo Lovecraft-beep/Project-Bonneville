@@ -190,7 +190,8 @@ def _research_recommendation(campaign, branch, tree):
 
 def create_engineering_report(
     vehicle, track, result, campaign=None, outcome=None, previous_report=None,
-    target=None, is_record_attempt=False,
+    target=None, is_record_attempt=False, record_attempt_in_progress=False,
+    record_attempt_average_mph=None,
 ):
     """Build a read-only debrief from one run and its campaign context."""
     diagnosis = diagnose_run(vehicle, result)
@@ -239,9 +240,19 @@ def create_engineering_report(
         if failed:
             target_assessment = "No record credited: this run was aborted."
         elif target is not None:
-            gap = target.speed_mph - result.measured_mile_speed_mph
+            assessed_speed = (
+                result.measured_mile_speed_mph
+                if record_attempt_average_mph is None
+                else record_attempt_average_mph
+            )
+            gap = target.speed_mph - assessed_speed
             benchmark = f"{target.year} {target.vehicle}: {target.speed_mph:.1f} mph"
-            if gap > 0:
+            if record_attempt_in_progress:
+                target_assessment = (
+                    f"Outbound pass {result.measured_mile_speed_mph:.1f} mph; "
+                    f"return pass required before assessing {benchmark}."
+                )
+            elif gap > 0:
                 target_assessment = f"{gap:.1f} mph short of {benchmark}. Continue development."
             elif is_record_attempt:
                 target_assessment = f"Historical benchmark beaten: {benchmark}."

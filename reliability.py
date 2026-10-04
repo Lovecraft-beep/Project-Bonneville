@@ -22,6 +22,9 @@ GEAR_FAILURE = FailureType("gear_failure", "Gear failure")
 TYRE_BURST = FailureType("tyre_burst", "Tyre burst")
 BRAKE_FADE = FailureType("brake_fade", "Brake fade")
 STEERING_VIBRATION = FailureType("steering_vibration", "Steering vibration")
+MAJOR_FAILURE_IDS = frozenset(
+    {GEAR_FAILURE.failure_id, TYRE_BURST.failure_id}
+)
 
 
 @dataclass(frozen=True)
@@ -122,5 +125,10 @@ def resolve_run_failure(
             if event_sample < cumulative_probability:
                 failure_type = candidate
                 break
-    repaired = failed and can_repair_trackside(team)
+    repaired = (
+        failed
+        and failure_type is not None
+        and failure_type.failure_id not in MAJOR_FAILURE_IDS
+        and can_repair_trackside(team)
+    )
     return RunOutcome(failure_probability, failed, repaired, failure_type)
