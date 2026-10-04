@@ -36,7 +36,11 @@ def build_vehicle_from_garage_entry(entry):
         mass=chassis.mass_kg,
         cd=chassis.drag_coefficient * (1.0 - aero_effects["drag_reduction"]),
         area=chassis.frontal_area_m2,
-        tyre_grip_factor=chassis.tyre_grip_factor,
+        tyre_grip_factor=(
+            chassis.tyre_grip_factor
+            if entry.tyre_grip_factor is None
+            else entry.tyre_grip_factor
+        ),
         engine=engine,
         wheel_radius_m=chassis.wheel_radius_m,
         gearbox=gearbox,

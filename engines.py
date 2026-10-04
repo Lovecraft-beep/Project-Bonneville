@@ -9,6 +9,11 @@ ENGINE_TUNE_STAGES = (
     (2, "Stage 2 - Raised compression", 1.08, 0.07),
     (3, "Stage 3 - Maximum boost, minimal margin", 1.12, 0.12),
 )
+def next_engine_tune_stage(stage):
+    """Return the next available tune stage, or None at the maximum."""
+    if stage >= len(ENGINE_TUNE_STAGES) - 1:
+        return None
+    return stage + 1
 MIN_TUNED_RELIABILITY = 0.05
 
 

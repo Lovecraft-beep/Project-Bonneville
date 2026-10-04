@@ -17,12 +17,17 @@ from brakes import BRAKE_BY_NAME
 from brakes import available_brakes
 from cars import AVAILABLE_CARS
 from chassis import CHASSIS_BY_ID
-from diagnostics import create_engineering_report, diagnose_run
+from diagnostics import (
+    create_engineering_report,
+    diagnose_run,
+    suggest_gear_ratio_adjustment,
+)
 from engines import (
     ALL_ENGINES,
     ENGINE_TUNE_STAGES,
     NAPIER_LION,
     PIONEER_SINGLE_CYLINDER,
+    next_engine_tune_stage,
     tune_engine,
 )
 from gearbox import PREBUILT_GEARBOXES, TRANSMISSION_CATALOG
@@ -33,12 +38,18 @@ from management import (
     GarageVehicle,
     Team,
     advance_turn,
+    adjust_vehicle_ratio_trackside,
     build_vehicle,
     calculate_run_cost,
     complete_run,
+    fit_trackside_tyres,
+    MAX_TESTS_PER_SESSION,
     hire_engineer,
     load_campaign,
+    next_vehicle_name,
+    retire_vehicle,
     reset_campaign,
+    register_test_run,
     save_campaign,
     sign_sponsor,
     start_engineering_project,
@@ -79,6 +90,57 @@ class RunCostTests(unittest.TestCase):
         self.assertEqual(calculate_run_cost(PUBLIC_ROADS), 200)
 
 
+class TestSessionTests(unittest.TestCase):
+    def test_eight_hourly_tests_fit_one_session_and_advance_resets_it(self):
+        campaign = CampaignState()
+        for expected_count in range(1, MAX_TESTS_PER_SESSION + 1):
+            self.assertEqual(register_test_run(campaign), expected_count)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "campaign_state.json"
+            save_campaign(campaign, path)
+            campaign = load_campaign(path)
+        self.assertEqual(campaign.tests_this_session, MAX_TESTS_PER_SESSION)
+        with self.assertRaisesRegex(ValueError, "session is full"):
+            register_test_run(campaign)
+
+        advance_turn(campaign, days=0)
+
+        self.assertEqual(campaign.tests_this_session, 0)
+
+
+class VehicleNamingTests(unittest.TestCase):
+    def test_name_defaults_follow_first_vehicle_and_skip_existing_names(self):
+        campaign = CampaignState()
+        self.assertEqual(next_vehicle_name(campaign), "Bonneville Special 01")
+        campaign.garage.vehicles.append(
+            GarageVehicle("Bluebird", "chassis", "engine", "gearbox", "brakes")
+        )
+        self.assertEqual(next_vehicle_name(campaign), "Bluebird 2")
+        campaign.garage.vehicles.append(
+            GarageVehicle("Bluebird 3", "chassis", "engine", "gearbox", "brakes")
+        )
+        self.assertEqual(next_vehicle_name(campaign), "Bluebird 4")
+
+    def test_vehicle_builder_trims_names_and_rejects_duplicates(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        campaign.garage.vehicles.append(
+            GarageVehicle("Bluebird", "chassis", "engine", "gearbox", "brakes")
+        )
+        app = SimpleNamespace(
+            campaign=campaign,
+            finish_vehicle_build=Mock(),
+        )
+        with patch("ui.app.messagebox.showerror") as show_error:
+            BonnevilleApp.confirm_vehicle_name(app, "  bluebird  ")
+            app.finish_vehicle_build.assert_not_called()
+            show_error.assert_called_once()
+
+        BonnevilleApp.confirm_vehicle_name(app, "  Bluebird 2  ")
+        app.finish_vehicle_build.assert_called_once_with("Bluebird 2")
+
+
 class EngineTuningTests(unittest.TestCase):
     def _garage_entry(self, stage=0):
         return GarageVehicle(
@@ -98,6 +160,38 @@ class EngineTuningTests(unittest.TestCase):
             self.assertGreater(tuned.torque_nm, previous.torque_nm)
             self.assertLess(tuned.reliability, previous.reliability)
             previous = tuned
+    def test_maximum_tune_stage_has_no_next_stage(self):
+        self.assertEqual(next_engine_tune_stage(0), 1)
+        self.assertIsNone(next_engine_tune_stage(len(ENGINE_TUNE_STAGES) - 1))
+
+    def test_garage_does_not_offer_another_tune_at_stage_three(self):
+        from ui.app import BonnevilleApp
+
+        app = SimpleNamespace(
+            campaign=CampaignState(),
+            body=Mock(),
+            show_page=Mock(),
+            page_title=Mock(),
+            card=Mock(return_value=Mock()),
+            section=Mock(),
+            action_button=Mock(),
+        )
+        scroll_area = Mock()
+        container = Mock()
+        page = Mock()
+        app.body.winfo_children.return_value = [scroll_area]
+        scroll_area.winfo_children.return_value = [container]
+        container.winfo_children.return_value = [page]
+
+        with patch("ui.app.tk.Frame"), patch("ui.app.tk.Label"):
+            BonnevilleApp.open_garage_vehicle(app, self._garage_entry(stage=3))
+
+        tune_labels = [
+            call.args[1]
+            for call in app.action_button.call_args_list
+            if call.args[1].startswith("Tune engine:")
+        ]
+        self.assertEqual(tune_labels, [])
 
     def test_tuning_does_not_mutate_catalogue_engine(self):
         stock_power = NAPIER_LION.power_hp
@@ -146,6 +240,107 @@ class EngineTuningTests(unittest.TestCase):
         )
 
 
+class TracksideServiceTests(unittest.TestCase):
+    def _garage_entry(self):
+        return GarageVehicle(
+            vehicle_name="Trackside Test",
+            chassis_id=CHASSIS_TECHNOLOGY_TREE[5].technology_id,
+            engine_name=NAPIER_LION.name,
+            gearbox_name=TRANSMISSION_CATALOG[2].name,
+            brakes_name="1920s mechanical drum brakes",
+        )
+
+    def test_gear_and_tyre_adjustments_persist_for_five_without_advancing_turn(self):
+        campaign = CampaignState()
+        entry = self._garage_entry()
+        campaign.garage.vehicles.append(entry)
+        starting_cash = campaign.team.cash
+        starting_turn = campaign.turn_number
+        original = build_vehicle_from_garage_entry(entry)
+
+        adjust_vehicle_ratio_trackside(campaign, entry, None, -0.1)
+        fit_trackside_tyres(campaign, entry)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "campaign_state.json"
+            save_campaign(campaign, path)
+            loaded = load_campaign(path)
+        rebuilt = build_vehicle_from_garage_entry(loaded.garage.vehicles[0])
+        self.assertAlmostEqual(
+            rebuilt.gearbox.final_drive_ratio,
+            original.gearbox.final_drive_ratio - 0.1,
+        )
+        self.assertAlmostEqual(
+            rebuilt.tyre_grip_factor, original.tyre_grip_factor + 0.03
+        )
+        self.assertEqual(loaded.team.cash, starting_cash - 10.0)
+        self.assertEqual(loaded.turn_number, starting_turn)
+
+    def test_mechanic_suggests_lengthening_final_drive_near_redline(self):
+        vehicle = AVAILABLE_CARS["1"]()
+        vehicle.gearbox.gears = (3.0, 2.0)
+        result = SimpleNamespace(
+            telemetry=[
+                SimpleNamespace(
+                    speed_mph=100.0,
+                    engine_rpm=int(vehicle.engine.max_rpm * 0.95),
+                    gear=2,
+                    wheelspin=False,
+                )
+            ],
+            average_acceleration_g=0.2,
+            wheelspin_event_count=0,
+        )
+
+        suggestion = suggest_gear_ratio_adjustment(vehicle, result)
+
+        self.assertEqual(suggestion.gear_index, None)
+        self.assertEqual(suggestion.delta, -0.1)
+        self.assertIn("Lengthen the final drive", suggestion.description)
+
+    def test_trackside_screen_offers_ratio_steps_and_another_test(self):
+        from ui.app import BonnevilleApp
+
+        entry = self._garage_entry()
+        vehicle = build_vehicle_from_garage_entry(entry)
+        app = BonnevilleApp.__new__(BonnevilleApp)
+        app.campaign = CampaignState()
+        app.last_run_is_sandbox = False
+        app.last_vehicle_entry = entry
+        app.last_vehicle = vehicle
+        app.last_result = SimpleNamespace(
+            telemetry=[
+                SimpleNamespace(
+                    speed_mph=10.0,
+                    engine_rpm=100,
+                    gear=1,
+                    wheelspin=False,
+                )
+            ],
+            average_acceleration_g=0.2,
+            wheelspin_event_count=0,
+        )
+        app.last_track = PUBLIC_ROADS
+        app.last_trackside_ratio_adjusted = False
+        app.scroll_area = Mock(return_value=Mock())
+        app.page_title = Mock()
+        app.section = Mock()
+        app.action_button = Mock()
+
+        with (
+            patch("ui.app.tk.Frame"),
+            patch("ui.app.tk.Label"),
+            patch("ui.app.tk.Button") as button,
+        ):
+            BonnevilleApp.render_trackside_modifications(app)
+
+        action_labels = [call.args[1] for call in app.action_button.call_args_list]
+        self.assertTrue(any("RUN ANOTHER TEST HERE" in label for label in action_labels))
+        self.assertTrue(any("APPLY SUGGESTION" in label for label in action_labels))
+        ratio_steps = {call.kwargs["text"] for call in button.call_args_list}
+        self.assertTrue({"-0.1", "+0.1"}.issubset(ratio_steps))
+
+
 class PresetVehicleRegressionTests(unittest.TestCase):
     def test_all_preset_cars_simulate_without_crashing(self):
         for car_key, factory in AVAILABLE_CARS.items():
@@ -164,6 +359,46 @@ class PresetVehicleRegressionTests(unittest.TestCase):
 
 
 class ResearchProjectSetupTests(unittest.TestCase):
+    def _research_app(self, campaign):
+        from ui.app import BonnevilleApp
+
+        app = BonnevilleApp.__new__(BonnevilleApp)
+        app.campaign = campaign
+        app.research_branch = "Engine"
+        return app
+
+    def test_only_aerodynamics_tab_is_available_at_campaign_start(self):
+        app = self._research_app(CampaignState())
+        self.assertTrue(app._research_branch_available("Aerodynamics"))
+        for branch in ("Engine", "Chassis", "Gearbox", "Tyres", "Brakes"):
+            self.assertFalse(app._research_branch_available(branch), branch)
+
+    def test_research_tabs_follow_completed_prerequisites(self):
+        campaign = self._pioneer_aero_campaign()
+        app = self._research_app(campaign)
+        self.assertTrue(app._research_branch_available("Chassis"))
+        self.assertFalse(app._research_branch_available("Engine"))
+        complete_engineering_project(campaign, "chassis", "carriage_frame")
+        for branch in ("Chassis", "Engine", "Tyres", "Brakes"):
+            self.assertTrue(app._research_branch_available(branch), branch)
+        self.assertFalse(app._research_branch_available("Gearbox"))
+
+    def test_active_project_and_resource_shortages_do_not_grey_unlocked_branch(self):
+        campaign = CampaignState()
+        start_engineering_project(campaign, "aerodynamics", "wind_deflector")
+        campaign.team.cash = 0
+        app = self._research_app(campaign)
+        self.assertEqual(campaign.available_engineers, 0)
+        self.assertTrue(app._research_branch_available("Aerodynamics"))
+
+    def test_fully_researched_branch_has_no_available_projects(self):
+        campaign = CampaignState()
+        campaign.research.engine_technology = [
+            node.technology_id for node in ENGINE_TECHNOLOGY_TREE
+        ]
+        app = self._research_app(campaign)
+        self.assertFalse(app._research_branch_available("Engine"))
+
     def _pioneer_aero_campaign(self):
         campaign = CampaignState()
         for node in AERODYNAMICS_TECHNOLOGY_TREE[:3]:
@@ -208,7 +443,8 @@ class EngineeringDiagnosisTests(unittest.TestCase):
                 ):
                     BonnevilleApp.execute_run(app, object(), PUBLIC_ROADS)
                 app.show_page.assert_called_once_with("Team Debrief")
-                app.advance_campaign_turn.assert_called_once_with(days=7)
+                app.advance_campaign_turn.assert_not_called()
+                self.assertEqual(app.campaign.tests_this_session, 1)
                 self.assertEqual(app.last_report.completed, not failed)
                 self.assertFalse(app.last_run_is_sandbox)
                 self.assertEqual(save_record.call_count, 0 if failed else 1)
@@ -591,6 +827,29 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
             self.assertEqual(loaded.team.engineers, campaign.team.engineers)
             self.assertEqual(loaded.campaign_id, campaign.campaign_id)
             self.assertEqual(len(loaded.world.rivals), len(campaign.world.rivals))
+
+    def test_retired_vehicle_moves_to_persistent_museum(self):
+        campaign = CampaignState()
+        vehicle = GarageVehicle(
+            vehicle_name="Museum Test",
+            chassis_id=CHASSIS_TECHNOLOGY_TREE[0].technology_id,
+            engine_name=ALL_ENGINES[0].name,
+            gearbox_name=TRANSMISSION_CATALOG[0].name,
+            brakes_name="1890s steel shoes",
+        )
+        campaign.garage.vehicles.append(vehicle)
+
+        retire_vehicle(campaign, vehicle)
+
+        self.assertEqual(campaign.garage.vehicles, [])
+        self.assertEqual(campaign.garage.museum, [vehicle])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "campaign_state.json"
+            save_campaign(campaign, path)
+            loaded = load_campaign(path)
+        self.assertEqual(loaded.garage.vehicles, [])
+        self.assertEqual(len(loaded.garage.museum), 1)
+        self.assertEqual(loaded.garage.museum[0].vehicle_name, vehicle.vehicle_name)
 
     def test_reset_campaign_clears_saved_state(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

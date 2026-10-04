@@ -2,9 +2,11 @@
 
 import json
 import uuid
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from chassis import CHASSIS_BY_ID
 from diagnostics import reset_vehicle_log
 from campaign_world import (
     RivalState,
@@ -17,6 +19,7 @@ from historical_records import (
     record_ids_achieved_by_speed,
     target_completed,
 )
+from gearbox import AVAILABLE_GEARBOXES, adjust_gearbox_ratio
 from research import (
     AERODYNAMICS_TECHNOLOGY_BY_ID,
     BRAKE_TECHNOLOGY_BY_ID,
@@ -34,6 +37,8 @@ DEFAULT_TEAM_NAME = "Bonneville Racing Team"
 ENGINEER_HIRE_COST_GBP = 8_000.0
 MECHANIC_HIRE_COST_GBP = 5_000.0
 WORKSHOP_UPGRADE_BASE_COST_GBP = 10_000.0
+TRACKSIDE_ADJUSTMENT_COST_GBP = 5.0
+MAX_TESTS_PER_SESSION = 8
 
 
 @dataclass
@@ -165,13 +170,15 @@ class GarageVehicle:
     gearbox_ratios: tuple[float, ...] = ()
     gearbox_final_drive: float | None = None
     engine_tune_stage: int = 0
+    tyre_grip_factor: float | None = None
 
 
 @dataclass
 class Garage:
-    """Custom vehicles built by the team and available for future runs."""
+    """Custom vehicles in service and preserved in the team museum."""
 
     vehicles: list[GarageVehicle] = field(default_factory=list)
+    museum: list[GarageVehicle] = field(default_factory=list)
 
 
 @dataclass
@@ -196,6 +203,7 @@ class CampaignState:
     current_year: int = STARTING_YEAR
     current_day_of_year: int = 1
     turn_number: int = 1
+    tests_this_session: int = 0
     completed_runs: int = 0
     failed_runs: int = 0
     best_measured_mile_speed_mph: float = 0.0
@@ -225,6 +233,30 @@ def calculate_run_cost(track):
     return track.event_cost_gbp
 
 
+def next_vehicle_name(campaign):
+    """Suggest a name, numbering later vehicles from the first vehicle's name."""
+    owned_vehicles = campaign.garage.vehicles + campaign.garage.museum
+    if not owned_vehicles:
+        return "Bonneville Special 01"
+
+    first_name = owned_vehicles[0].vehicle_name.strip()
+    base_name, separator, suffix = first_name.rpartition(" ")
+    if separator and suffix.isdigit():
+        first_number = int(suffix)
+    else:
+        base_name = first_name
+        first_number = 1
+    base_name = base_name.strip() or "Bonneville Special"
+
+    existing_names = {vehicle.vehicle_name.casefold() for vehicle in owned_vehicles}
+    next_number = first_number + len(owned_vehicles)
+    candidate = f"{base_name} {next_number}"
+    while candidate.casefold() in existing_names:
+        next_number += 1
+        candidate = f"{base_name} {next_number}"
+    return candidate
+
+
 def load_campaign(path=CAMPAIGN_FILE):
     """Load campaign state, creating a fresh campaign when none exists."""
     if not path.exists():
@@ -245,7 +277,10 @@ def load_campaign(path=CAMPAIGN_FILE):
         data["garage"] = Garage(
             vehicles=[
                 GarageVehicle(**vehicle) for vehicle in garage_data.get("vehicles", [])
-            ]
+            ],
+            museum=[
+                GarageVehicle(**vehicle) for vehicle in garage_data.get("museum", [])
+            ],
         )
         data.setdefault(
             "completed_historical_record_ids",
@@ -333,6 +368,7 @@ def advance_turn(campaign, days=365):
         campaign.team.cash + campaign.sponsorship.income_per_turn_gbp, 2
     )
     campaign.turn_number += 1
+    campaign.tests_this_session = 0
     elapsed_days = campaign.current_day_of_year - 1 + days
     campaign.current_year += elapsed_days // 365
     campaign.current_day_of_year = elapsed_days % 365 + 1
@@ -351,6 +387,14 @@ def advance_turn(campaign, days=365):
     if campaign.current_year != previous_year:
         advance_world(campaign)
     return tuple(completed_projects)
+
+
+def register_test_run(campaign):
+    """Record one hourly campaign test, enforcing the session limit."""
+    if campaign.tests_this_session >= MAX_TESTS_PER_SESSION:
+        raise ValueError("test session is full; advance campaign time to start another")
+    campaign.tests_this_session += 1
+    return campaign.tests_this_session
 
 
 _ENGINEERING_PROJECT_BRANCHES = {
@@ -506,3 +550,63 @@ def build_vehicle(campaign, garage_entry, cost_gbp, vehicle=None):
     campaign.garage.vehicles.append(garage_entry)
     if vehicle is not None:
         reset_vehicle_log(vehicle)
+
+
+def _charge_trackside_adjustment(campaign):
+    if campaign.team.cash < TRACKSIDE_ADJUSTMENT_COST_GBP:
+        raise ValueError("insufficient funds for trackside service")
+    campaign.team.cash = round(
+        campaign.team.cash - TRACKSIDE_ADJUSTMENT_COST_GBP, 2
+    )
+
+
+def _require_active_garage_vehicle(campaign, garage_entry):
+    if not any(vehicle is garage_entry for vehicle in campaign.garage.vehicles):
+        raise ValueError("vehicle is not in the active garage")
+
+
+def adjust_vehicle_ratio_trackside(campaign, garage_entry, gear_index, delta):
+    """Apply and charge for a small trackside gearbox ratio adjustment."""
+    _require_active_garage_vehicle(campaign, garage_entry)
+    gearbox = deepcopy(AVAILABLE_GEARBOXES[garage_entry.gearbox_name])
+    if garage_entry.gearbox_ratios:
+        gearbox.gears = tuple(garage_entry.gearbox_ratios)
+    if garage_entry.gearbox_final_drive is not None:
+        gearbox.final_drive = garage_entry.gearbox_final_drive
+    if not adjust_gearbox_ratio(gearbox, gear_index, delta):
+        raise ValueError("requested ratio is outside the adjustment limits")
+
+    _charge_trackside_adjustment(campaign)
+    garage_entry.gearbox_ratios = tuple(gearbox.gears)
+    garage_entry.gearbox_final_drive = gearbox.final_drive_ratio
+
+
+def fit_trackside_tyres(campaign, garage_entry):
+    """Fit a modestly higher-grip tyre set without advancing campaign time."""
+    _require_active_garage_vehicle(campaign, garage_entry)
+    if garage_entry.tyre_grip_factor is not None:
+        raise ValueError("this vehicle already has its trackside tyre set")
+    current_grip = CHASSIS_BY_ID[garage_entry.chassis_id].tyre_grip_factor
+    replacement_grip = min(1.0, current_grip + 0.03)
+    if replacement_grip <= current_grip:
+        raise ValueError("this vehicle is already at the tyre grip limit")
+
+    _charge_trackside_adjustment(campaign)
+    garage_entry.tyre_grip_factor = round(replacement_grip, 3)
+    return garage_entry.tyre_grip_factor
+
+
+def retire_vehicle(campaign, garage_entry):
+    """Move an active garage vehicle into the team's museum."""
+    vehicle_index = next(
+        (
+            index
+            for index, vehicle in enumerate(campaign.garage.vehicles)
+            if vehicle is garage_entry
+        ),
+        None,
+    )
+    if vehicle_index is None:
+        raise ValueError("vehicle is not in the active garage")
+
+    campaign.garage.museum.append(campaign.garage.vehicles.pop(vehicle_index))

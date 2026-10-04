@@ -8,8 +8,18 @@ from tkinter import messagebox
 from brakes import BRAKE_CATALOG, available_brakes
 from cars import AVAILABLE_CARS
 from chassis import available_chassis
-from diagnostics import append_run_log, create_engineering_report
+from diagnostics import (
+    append_run_log,
+    create_engineering_report,
+    suggest_gear_ratio_adjustment,
+)
 from engines import AVAILABLE_ENGINES, ENGINE_TUNE_STAGES, available_engines
+from engines import (
+    AVAILABLE_ENGINES,
+    ENGINE_TUNE_STAGES,
+    available_engines,
+    next_engine_tune_stage,
+)
 from gearbox import (
     DIRECT_DRIVE,
     PREBUILT_GEARBOXES,
@@ -22,18 +32,25 @@ from historical_challenges import CHALLENGES, simulate_challenge
 from historical_records import next_historical_target
 from management import (
     advance_turn,
+    adjust_vehicle_ratio_trackside,
     build_vehicle,
     calculate_run_cost,
     calculate_workshop_upgrade_cost,
     complete_failed_run,
     complete_run,
+    fit_trackside_tyres,
     hire_engineer,
     hire_mechanic,
     load_campaign,
+    MAX_TESTS_PER_SESSION,
+    next_vehicle_name,
     reset_campaign,
+    register_test_run,
+    retire_vehicle,
     save_campaign,
     sign_sponsor,
     start_engineering_project,
+    TRACKSIDE_ADJUSTMENT_COST_GBP,
     upgrade_workshop,
 )
 from records import create_record, load_records, save_record
@@ -81,6 +98,8 @@ class BonnevilleApp(tk.Tk):
         self.builder = {}
         self.last_result = None
         self.last_vehicle = None
+        self.last_vehicle_entry = None
+        self.last_trackside_ratio_adjusted = False
         self.last_track = None
         self.last_run_note = "No test run recorded this session."
         self.last_record_message = None
@@ -181,6 +200,7 @@ class BonnevilleApp(tk.Tk):
             "Research": self.render_research,
             "Garage": self.render_garage,
             "Test Runs": self.render_test_runs,
+            "Trackside Modifications": self.render_trackside_modifications,
             "Test Facility": self.render_test_facility,
             "Team Debrief": self.render_team_debrief,
             "Telemetry": self.render_telemetry,
@@ -359,11 +379,13 @@ class BonnevilleApp(tk.Tk):
         tabs = tk.Frame(page, bg=INK)
         tabs.pack(fill="x", pady=(0, 10))
         for branch in ("Engine", "Chassis", "Aerodynamics", "Gearbox", "Tyres", "Brakes"):
+            available = self._research_branch_available(branch)
             tk.Button(
                 tabs, text=branch.upper(), command=lambda value=branch: self.set_research_branch(value),
-                bg=PANEL_LIGHT if self.research_branch == branch else PANEL,
-                fg=LIME if self.research_branch == branch else PAPER,
-                activebackground=ACCENT, activeforeground=INK, relief="flat", borderwidth=0,
+                bg=PANEL_LIGHT if self.research_branch == branch else PANEL if available else INK,
+                fg=(LIME if self.research_branch == branch else PAPER) if available else MUTED,
+                activebackground=ACCENT if available else PANEL_LIGHT,
+                activeforeground=INK if available else MUTED, relief="flat", borderwidth=0,
                 font=(FONT, 9, "bold"), padx=13, pady=10, cursor="hand2",
             ).pack(side="left", padx=(0, 5))
         self._render_research_nodes(page)
@@ -372,7 +394,7 @@ class BonnevilleApp(tk.Tk):
         self.research_branch = branch
         self.show_page("Research")
 
-    def _research_data(self):
+    def _research_data(self, branch=None):
         branches = {
             "Engine": (ENGINE_TECHNOLOGY_TREE, self.campaign.research.engine_technology, self.campaign.research.chassis_technology),
             "Chassis": (CHASSIS_TECHNOLOGY_TREE, self.campaign.research.chassis_technology, self.campaign.research.aerodynamics_technology),
@@ -381,7 +403,17 @@ class BonnevilleApp(tk.Tk):
             "Tyres": (TYRE_TECHNOLOGY_TREE, self.campaign.research.tyre_technology, self.campaign.research.chassis_technology),
             "Brakes": (BRAKE_TECHNOLOGY_TREE, self.campaign.research.brake_technology, self.campaign.research.chassis_technology),
         }
-        return branches[self.research_branch]
+        return branches[branch if branch is not None else self.research_branch]
+
+    def _research_branch_available(self, branch):
+        tree, researched, shared_researched = self._research_data(branch)
+        researched_set = set(researched)
+        combined = researched_set | set(shared_researched)
+        return any(
+            node.technology_id not in researched_set
+            and set(node.prerequisites).issubset(combined)
+            for node in tree
+        )
 
     def _render_research_nodes(self, parent):
         tree, researched, shared_researched = self._research_data()
@@ -448,15 +480,23 @@ class BonnevilleApp(tk.Tk):
         if not self.campaign.garage.vehicles:
             self.section(page, "Empty garage")
             tk.Label(page, text="Build your first car to unlock campaign test runs.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w")
-            return
-        self.section(page, f"{len(self.campaign.garage.vehicles)} vehicles")
-        for entry in self.campaign.garage.vehicles:
-            vehicle = build_vehicle_from_garage_entry(entry)
-            frame = tk.Frame(page, bg=PANEL, padx=16, pady=14)
-            frame.pack(fill="x", pady=4)
-            tk.Label(frame, text=vehicle.name, bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 17, "bold")).pack(anchor="w")
-            tk.Label(frame, text=f"{vehicle.engine.name}  /  {vehicle.engine.power_hp:,.0f} hp     {vehicle.gearbox.name}     {vehicle.mass:,.0f} kg", bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(anchor="w", pady=(4, 10))
-            self.action_button(frame, "OPEN VEHICLE", lambda item=entry: self.open_garage_vehicle(item))
+        else:
+            self.section(page, f"{len(self.campaign.garage.vehicles)} vehicles")
+            for entry in self.campaign.garage.vehicles:
+                vehicle = build_vehicle_from_garage_entry(entry)
+                frame = tk.Frame(page, bg=PANEL, padx=16, pady=14)
+                frame.pack(fill="x", pady=4)
+                tk.Label(frame, text=vehicle.name, bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 17, "bold")).pack(anchor="w")
+                tk.Label(frame, text=f"{vehicle.engine.name}  /  {vehicle.engine.power_hp:,.0f} hp     {vehicle.gearbox.name}     {vehicle.mass:,.0f} kg", bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(anchor="w", pady=(4, 10))
+                self.action_button(frame, "OPEN VEHICLE", lambda item=entry: self.open_garage_vehicle(item))
+        if self.campaign.garage.museum:
+            self.section(page, f"Museum  /  {len(self.campaign.garage.museum)} retired designs")
+            for entry in self.campaign.garage.museum:
+                vehicle = build_vehicle_from_garage_entry(entry)
+                row = tk.Frame(page, bg=PANEL, padx=16, pady=12)
+                row.pack(fill="x", pady=3)
+                tk.Label(row, text=vehicle.name, bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 15, "bold")).pack(anchor="w")
+                tk.Label(row, text=f"{vehicle.engine.name}  /  {vehicle.engine.power_hp:,.0f} hp     {vehicle.gearbox.name}     {vehicle.mass:,.0f} kg", bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(anchor="w", pady=(4, 0))
 
     def open_garage_vehicle(self, entry):
         self.selected_vehicle = entry
@@ -476,14 +516,31 @@ class BonnevilleApp(tk.Tk):
         if entry.engine_name in AVAILABLE_ENGINES:
             stages = ENGINE_TUNE_STAGES
             current = min(entry.engine_tune_stage, len(stages) - 1)
-            next_stage = (current + 1) % len(stages)
-            self.action_button(page, f"Tune engine: advance to stage {next_stage}", lambda: self.set_engine_tune(entry, next_stage))
+            next_stage = next_engine_tune_stage(current)
+            if next_stage is not None:
+                self.action_button(page, f"Tune engine: advance to stage {next_stage}", lambda: self.set_engine_tune(entry, next_stage))
         self.action_button(page, "Tune gearbox ratios", lambda: self.tune_vehicle_gearbox(entry))
         if self.campaign.research.has_gearbox_technology("computer_optimised_gear_ratios"):
             self.action_button(page, "Optimise gear ratios", lambda: self.optimise_vehicle(entry))
         if set(self.campaign.research.aerodynamics_technology) - set(entry.aerodynamics_technology):
             self.action_button(page, "Fit latest aerodynamics package", lambda: self.fit_aero(entry))
+        self.action_button(page, "RETIRE TO MUSEUM", lambda: self.retire_garage_vehicle(entry))
         self.action_button(page, "BACK TO GARAGE", lambda: self.show_page("Garage"))
+
+    def retire_garage_vehicle(self, entry):
+        if not messagebox.askyesno(
+            "Retire vehicle",
+            f"Move {entry.vehicle_name} to the museum? It will no longer be available for campaign test runs.",
+            parent=self,
+        ):
+            return
+        try:
+            retire_vehicle(self.campaign, entry)
+        except ValueError as exc:
+            messagebox.showerror("Unable to retire vehicle", str(exc), parent=self)
+            return
+        save_campaign(self.campaign)
+        self.show_page("Garage")
 
     def choose_component(self, entry, component):
         if component == "engine":
@@ -587,9 +644,9 @@ class BonnevilleApp(tk.Tk):
         for child in self.body.winfo_children():
             child.destroy()
         page = self.scroll_area()
-        steps = ("chassis", "engine", "gearbox", "brakes")
+        steps = ("chassis", "engine", "gearbox", "brakes", "name")
         step = self.builder.get("step", "chassis")
-        labels = {"chassis": "Select a chassis", "engine": "Select an engine", "gearbox": "Select a gearbox", "brakes": "Select a brake system"}
+        labels = {"chassis": "Select a chassis", "engine": "Select an engine", "gearbox": "Select a gearbox", "brakes": "Select a brake system", "name": "Name your vehicle"}
         self.page_title(page, "Vehicle designer", labels[step], "Choose from unlocked, historically available components. The vehicle name is assigned automatically.")
         if step == "chassis":
             choices = available_chassis(self.campaign.research.chassis_technology)
@@ -603,29 +660,63 @@ class BonnevilleApp(tk.Tk):
             choices = (DIRECT_DRIVE,) if engine.torque_curve_type in ("turbojet", "rocket") else TRANSMISSION_CATALOG
             for item in choices:
                 self.action_button(page, f"{item.name}  /  {item.gear_count} gears  /  {item.efficiency:.0%} efficiency  /  GBP {item.cost_gbp:,.0f}", lambda value=item: self.builder_select("gearbox", value))
-        else:
+        elif step == "brakes":
             for item in available_brakes(self.campaign.current_year):
                 self.action_button(page, f"{item.name}  /  {item.max_braking_g:.2f} g  /  GBP {item.cost_gbp:,.0f}", lambda value=item: self.builder_select("brakes", value))
+        else:
+            default_name = self.builder.setdefault(
+                "vehicle_name", next_vehicle_name(self.campaign)
+            )
+            tk.Label(page, text="Vehicle name", bg=INK, fg=PAPER, font=(FONT, 10, "bold")).pack(anchor="w", pady=(8, 4))
+            name_input = tk.Entry(page, bg=PANEL, fg=PAPER, insertbackground=PAPER, relief="flat", font=(FONT, 12))
+            name_input.insert(0, default_name)
+            name_input.pack(fill="x", pady=(0, 12), ipady=8)
+            self.action_button(
+                page,
+                "CONFIRM VEHICLE NAME",
+                lambda: self.builder_select("name", name_input.get()),
+                True,
+            )
         self.action_button(page, "CANCEL DESIGN", lambda: self.show_page("Garage"))
 
     def builder_select(self, key, value):
+        if key == "name":
+            self.confirm_vehicle_name(value)
+            return
         self.builder[key] = value
-        order = ("chassis", "engine", "gearbox", "brakes")
+        order = ("chassis", "engine", "gearbox", "brakes", "name")
         current_index = order.index(key)
         if current_index < len(order) - 1:
             self.builder["step"] = order[current_index + 1]
             self.render_builder()
             return
-        self.finish_vehicle_build()
+        self.render_builder()
 
-    def finish_vehicle_build(self):
+    def confirm_vehicle_name(self, vehicle_name):
+        name = vehicle_name.strip()
+        if not name:
+            messagebox.showerror("Vehicle name required", "Enter a name for this vehicle.", parent=self)
+            return
+        existing_names = {
+            entry.vehicle_name.casefold()
+            for entry in self.campaign.garage.vehicles + self.campaign.garage.museum
+        }
+        if name.casefold() in existing_names:
+            messagebox.showerror(
+                "Vehicle name already used",
+                "Choose a name that is not already in the garage or museum.",
+                parent=self,
+            )
+            return
+        self.finish_vehicle_build(name)
+
+    def finish_vehicle_build(self, name):
         chassis = self.builder["chassis"]
         engine = self.builder["engine"]
         gearbox = deepcopy(self.builder["gearbox"])
         brakes = replace(self.builder["brakes"])
         aero = tuple(self.campaign.research.aerodynamics_technology)
         effect = aerodynamics_effects(aero)
-        name = f"Bonneville Special {len(self.campaign.garage.vehicles) + 1:02d}"
         vehicle = Vehicle(
             name=name,
             mass=chassis.mass_kg,
@@ -667,6 +758,11 @@ class BonnevilleApp(tk.Tk):
     def render_test_runs(self):
         page = self.scroll_area()
         self.page_title(page, "Track operations", "Prepare a test run", "Select a garage vehicle, then an available circuit. The simulation, costs, reliability checks, records, and campaign turn are unchanged.")
+        tests_remaining = MAX_TESTS_PER_SESSION - self.campaign.tests_this_session
+        self.section(page, f"Test session  /  {self.campaign.tests_this_session} of {MAX_TESTS_PER_SESSION} hourly tests")
+        if tests_remaining <= 0:
+            tk.Label(page, text="This session is full. Advance campaign time to open another eight-test session.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w")
+            return
         self.section(page, "Garage vehicles")
         if not self.campaign.garage.vehicles:
             tk.Label(page, text="No campaign vehicles are available. Build one in the Garage first.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w")
@@ -710,6 +806,7 @@ class BonnevilleApp(tk.Tk):
         self.last_run_is_sandbox = True
         self.last_result = result
         self.last_vehicle = vehicle
+        self.last_vehicle_entry = None
         self.last_track = track
         self.last_run_note = "Engineering facility / sandbox result. The campaign was not changed."
         self.last_record_message = None
@@ -755,13 +852,21 @@ class BonnevilleApp(tk.Tk):
         self._render_track_choices(record_attempt=True)
 
     def execute_run(self, entry, track, record_attempt=False):
+        if self.campaign.tests_this_session >= MAX_TESTS_PER_SESSION:
+            messagebox.showerror(
+                "Test session full",
+                "This session is limited to eight hourly tests. Advance campaign time to start another session.",
+                parent=self,
+            )
+            return
         vehicle = build_vehicle_from_garage_entry(entry)
         cost = calculate_run_cost(track)
         if cost > self.campaign.team.cash:
             messagebox.showerror("Insufficient funds", f"This run costs GBP {cost:,.0f}; the campaign has GBP {self.campaign.team.cash:,.0f}.", parent=self)
             return
-        if not messagebox.askyesno("Confirm test run", f"{vehicle.name} at {track.name}\nEstimated cost: GBP {cost:,.0f}\nProceed with simulation?", parent=self):
+        if not messagebox.askyesno("Confirm test run", f"{vehicle.name} at {track.name}\nEstimated cost: GBP {cost:,.0f}\nSession test {self.campaign.tests_this_session + 1} of {MAX_TESTS_PER_SESSION}\nProceed with simulation?", parent=self):
             return
+        register_test_run(self.campaign)
         result = run_simulation(
             vehicle,
             track_miles=track.length_miles,
@@ -795,7 +900,6 @@ class BonnevilleApp(tk.Tk):
                     f"at {result.measured_mile_speed_mph:.1f} mph."
                 )
             save_record(create_record(vehicle, track, result, self.campaign))
-        self.advance_campaign_turn(days=7)
         save_campaign(self.campaign)
         self.last_report = create_engineering_report(
             vehicle, track, result, self.campaign, outcome,
@@ -805,6 +909,8 @@ class BonnevilleApp(tk.Tk):
         self.last_run_is_sandbox = False
         self.last_result = result
         self.last_vehicle = vehicle
+        self.last_vehicle_entry = entry
+        self.last_trackside_ratio_adjusted = False
         self.last_track = track
         self.show_page("Team Debrief")
 
@@ -826,6 +932,11 @@ class BonnevilleApp(tk.Tk):
         report_text(f"Vehicle: {report.vehicle_name}  /  Venue: {report.track_name}", MUTED)
         report_text(report.run_status, LIME if report.completed else ACCENT, (FONT, 10, "bold"))
         report_text(self.last_run_note, MUTED)
+        if not self.last_run_is_sandbox:
+            report_text(
+                f"Test session: {self.campaign.tests_this_session} of {MAX_TESTS_PER_SESSION} hourly tests used.",
+                MUTED,
+            )
         if self.last_record_message:
             report_text(self.last_record_message, LIME)
         self.section(page, "Primary concern")
@@ -842,6 +953,18 @@ class BonnevilleApp(tk.Tk):
         self.section(page, "Recommendations")
         for number, recommendation in enumerate(report.recommendations, start=1):
             report_text(f"{number}. {recommendation}")
+        if not self.last_run_is_sandbox and self.last_vehicle_entry is not None:
+            suggestion = suggest_gear_ratio_adjustment(
+                self.last_vehicle, self.last_result
+            )
+            if suggestion is not None:
+                self.section(page, "Mechanic's ratio suggestion")
+                report_text(suggestion.description, MUTED)
+                if self.last_trackside_ratio_adjusted:
+                    report_text(
+                        "Adjustment applied. Run another test for fresh advice.",
+                        MUTED,
+                    )
         self.section(page, "Team assessment")
         report_text(report.comparison, MUTED)
         report_text(report.target_assessment, LIME if report.completed else ACCENT)
@@ -850,10 +973,116 @@ class BonnevilleApp(tk.Tk):
             self.action_button(page, "RETURN TO TEST FACILITY", lambda: self.show_page("Test Facility"), True)
         else:
             self.action_button(page, f"REVIEW {report.research_branch.upper()} RESEARCH", lambda: self.set_research_branch(report.research_branch), True)
-            self.action_button(page, "MODIFY VEHICLE IN GARAGE", lambda: self.show_page("Garage"))
+            self.action_button(page, "TRACKSIDE MODIFICATIONS", lambda: self.show_page("Trackside Modifications"))
             self.action_button(page, "PREPARE NEXT TEST", lambda: self.show_page("Test Runs"))
             if report.completed and self.campaign.garage.vehicles and next_historical_target(self.campaign.current_year, self.campaign.completed_historical_record_ids):
                 self.action_button(page, "PLAN RECORD ATTEMPT", self.start_record_attempt)
+
+    def render_trackside_modifications(self):
+        page = self.scroll_area()
+        entry = self.last_vehicle_entry
+        if self.last_run_is_sandbox or entry is None:
+            self.page_title(page, "Trackside service", "No campaign vehicle", "Run a campaign vehicle test to open trackside modifications.")
+            self.action_button(page, "BACK TO DEBRIEF", lambda: self.show_page("Team Debrief"))
+            return
+
+        vehicle = build_vehicle_from_garage_entry(entry)
+        tests_remaining = MAX_TESTS_PER_SESSION - self.campaign.tests_this_session
+        self.page_title(
+            page,
+            "Trackside service",
+            "Trackside modifications",
+            f"{vehicle.name}  /  {self.last_track.name}  /  {tests_remaining} hourly test(s) remaining this session.",
+        )
+        suggestion = suggest_gear_ratio_adjustment(self.last_vehicle, self.last_result)
+        if suggestion is not None:
+            self.section(page, "Mechanic's suggestion")
+            tk.Label(page, text=suggestion.description, bg=INK, fg=MUTED, font=(FONT, 11), wraplength=1000, justify="left").pack(anchor="w", pady=(0, 8))
+            if not self.last_trackside_ratio_adjusted:
+                self.action_button(
+                    page,
+                    f"APPLY SUGGESTION / GBP {TRACKSIDE_ADJUSTMENT_COST_GBP:.0f}",
+                    self.apply_trackside_ratio_suggestion,
+                )
+
+        self.section(page, "Gearbox ratios")
+        self._trackside_ratio_control(
+            page, entry, None, vehicle.gearbox.final_drive_ratio
+        )
+        for index, ratio in enumerate(vehicle.gearbox.gears):
+            self._trackside_ratio_control(page, entry, index, ratio)
+
+        self.section(page, "Tyres")
+        if entry.tyre_grip_factor is None:
+            self.action_button(
+                page,
+                f"FIT TRACKSIDE TYRES (+0.03 GRIP) / GBP {TRACKSIDE_ADJUSTMENT_COST_GBP:.0f}",
+                self.fit_trackside_tyres,
+            )
+        else:
+            tk.Label(page, text=f"Trackside tyre set fitted  /  Grip {vehicle.tyre_grip_factor:.2f}", bg=INK, fg=MUTED, font=(FONT, 10)).pack(anchor="w")
+
+        if tests_remaining > 0:
+            self.action_button(
+                page,
+                f"RUN ANOTHER TEST HERE / {tests_remaining} REMAINING",
+                lambda: self.execute_run(entry, self.last_track),
+                True,
+            )
+        else:
+            tk.Label(page, text="Session complete. Advance campaign time to open another session.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w", pady=8)
+        self.action_button(page, "BACK TO DEBRIEF", lambda: self.show_page("Team Debrief"))
+
+    def _trackside_ratio_control(self, parent, entry, gear_index, value):
+        label = "Final drive" if gear_index is None else f"Gear {gear_index + 1}"
+        row = tk.Frame(parent, bg=PANEL, padx=14, pady=10)
+        row.pack(fill="x", pady=3)
+        tk.Label(row, text=label, bg=PANEL, fg=PAPER, font=(FONT, 10, "bold")).pack(side="left")
+        tk.Label(row, text=f"{value:.3f}", bg=PANEL, fg=LIME, font=(FONT, 11, "bold")).pack(side="right", padx=12)
+        for delta in (-0.1, 0.1):
+            tk.Button(
+                row,
+                text=f"{delta:+.1f}",
+                command=lambda change=delta: self.adjust_trackside_ratio(entry, gear_index, change),
+                bg=PANEL_LIGHT,
+                fg=PAPER,
+                relief="flat",
+                padx=10,
+                pady=5,
+            ).pack(side="right", padx=3)
+
+    def adjust_trackside_ratio(self, entry, gear_index, delta):
+        try:
+            adjust_vehicle_ratio_trackside(
+                self.campaign, entry, gear_index, delta
+            )
+        except ValueError as exc:
+            messagebox.showerror("Trackside adjustment unavailable", str(exc), parent=self)
+            return
+        self.last_trackside_ratio_adjusted = True
+        self.last_vehicle = build_vehicle_from_garage_entry(entry)
+        save_campaign(self.campaign)
+        self.show_page("Trackside Modifications")
+
+    def apply_trackside_ratio_suggestion(self):
+        suggestion = suggest_gear_ratio_adjustment(
+            self.last_vehicle, self.last_result
+        )
+        if suggestion is None:
+            return
+        self.adjust_trackside_ratio(
+            self.last_vehicle_entry, suggestion.gear_index, suggestion.delta
+        )
+
+    def fit_trackside_tyres(self):
+        try:
+            fit_trackside_tyres(self.campaign, self.last_vehicle_entry)
+        except ValueError as exc:
+            messagebox.showerror("Trackside tyre change unavailable", str(exc), parent=self)
+            return
+        self.last_vehicle = build_vehicle_from_garage_entry(self.last_vehicle_entry)
+        save_campaign(self.campaign)
+        self.show_page("Trackside Modifications")
 
     def render_telemetry(self):
         page = self.scroll_area()
@@ -1134,6 +1363,7 @@ class BonnevilleApp(tk.Tk):
         self.last_run_is_sandbox = True
         self.last_result = result
         self.last_vehicle = vehicle
+        self.last_vehicle_entry = None
         self.last_track = challenge.track
         self.last_record_message = None
         if result.measured_mile_speed_mph >= challenge.target_speed_mph:

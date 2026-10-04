@@ -28,6 +28,74 @@ class RunDiagnosis:
     research_branch: str
 
 
+@dataclass(frozen=True)
+class GearRatioSuggestion:
+    gear_index: int | None
+    delta: float
+    description: str
+
+
+def suggest_gear_ratio_adjustment(vehicle, result):
+    """Offer a small, telemetry-based gearbox adjustment for the next run."""
+    gearbox = vehicle.gearbox
+    if gearbox.gear_count < 2 or not result.telemetry:
+        return None
+
+    peak_sample = max(result.telemetry, key=lambda sample: sample.speed_mph)
+    final_drive = gearbox.final_drive_ratio
+    first_gear = gearbox.gears[0]
+    if (
+        peak_sample.gear == gearbox.gear_count
+        and peak_sample.engine_rpm >= vehicle.engine.max_rpm * 0.88
+        and final_drive > 0.5
+    ):
+        return GearRatioSuggestion(
+            None,
+            -0.1,
+            "Lengthen the final drive (-0.1) to leave more top-end RPM headroom.",
+        )
+
+    if (
+        any(sample.gear == 1 and sample.wheelspin for sample in result.telemetry)
+        and first_gear > 0.5
+    ):
+        return GearRatioSuggestion(
+            0,
+            -0.1,
+            "Try a taller first gear (-0.1) to soften wheelspin off the line.",
+        )
+
+    if (
+        result.average_acceleration_g < 0.1
+        and result.wheelspin_event_count == 0
+        and first_gear < 5.0
+    ):
+        return GearRatioSuggestion(
+            0,
+            0.1,
+            "Try a shorter first gear (+0.1) for stronger launch pull.",
+        )
+
+    if (
+        peak_sample.gear == gearbox.gear_count
+        and peak_sample.engine_rpm < vehicle.engine.max_rpm * 0.7
+        and final_drive < 6.0
+    ):
+        return GearRatioSuggestion(
+            None,
+            0.1,
+            "Shorten the final drive (+0.1) to bring engine RPM closer to its power band.",
+        )
+
+    if first_gear < 5.0:
+        return GearRatioSuggestion(
+            0,
+            0.1,
+            "Try a shorter first gear (+0.1) for stronger launch pull.",
+        )
+    return None
+
+
 def diagnose_run(vehicle, result):
     """Turn run telemetry into one actionable engineering recommendation."""
     if any(sample.brake_fade for sample in result.telemetry):
