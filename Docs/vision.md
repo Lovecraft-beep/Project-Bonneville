@@ -6,6 +6,12 @@ Players begin in the earliest era of motor racing, constructing primitive record
 
 The core gameplay focuses on engineering decision-making. Every vehicle is a compromise between power, mass, aerodynamics, structural strength, reliability, safety and cost. Success comes from understanding these trade-offs better than competing teams and continuously refining designs through testing and analysis.
 
+## Current Foundation
+
+The playable prototype already supports a campaign with budgets, strategic turns, staffed multi-turn research projects, and a garage for assembling vehicles from chassis and components. Players can run tests, inspect speed and acceleration telemetry, receive engineering debriefs, and preserve historical records of successful attempts.
+
+This is the foundation for the larger vision, not its finished form. Active rival teams, sponsorship objectives, deeper workshop development, bodywork choices, and authentic record procedures remain areas for future development.
+
 ## Core Pillars
 
 ### Engineering First
@@ -113,6 +119,18 @@ A typical gameplay loop consists of:
 - Reinvesting rewards into future development
 
 Success unlocks access to more advanced facilities, technologies and engineering opportunities.
+
+## Development Priorities
+
+The next stage should make the campaign world more responsive to the player's engineering choices:
+
+- Rival teams pursue records and create historical competition.
+- Sponsorship contracts add financial, publicity and record-breaking objectives.
+- Team and workshop development give hiring, facilities and specialist expertise a meaningful role.
+- Bodywork and aerodynamic choices make research visible in vehicle design.
+- Campaign events create consequences and stories around failures, breakthroughs and rival achievements.
+
+As these management systems grow, the simulation can deepen with more authentic record rules, expanded vehicle dynamics, and tools for exporting and comparing telemetry. External vehicle validation or 3D presentation through BeamNG or Unity should remain optional and follow a mature, enjoyable internal simulation.
 
 ## Vehicle Categories
 

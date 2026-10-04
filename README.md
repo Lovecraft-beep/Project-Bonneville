@@ -34,9 +34,9 @@ The simulation models:
 - Wheelspin detection when requested force exceeds available traction
 - Historically inspired engine definitions, beginning with the Napier Lion
 - A selectable vehicle catalogue including Brick Mk1, Blue Bird 1927, and the
-	1931 Campbell-Napier-Railton Blue Bird
+  1931 Campbell-Napier-Railton Blue Bird
 - A selectable track catalogue with Bonneville Salt Flats, Brooklands, Pendine
-	Sands, Daytona Beach, Black Rock Desert, Doncaster Test Track, and Public Roads
+  Sands, Daytona Beach, Black Rock Desert, Doncaster Test Track, and Public Roads
 - A configurable track length
 - A measured mile within the track
 - Acceleration, measured-mile travel, and deceleration phases
@@ -182,7 +182,7 @@ average speed. The most recent records are displayed after each run.
 - `vehicle.py` defines the `Vehicle` class and its engineering properties.
 - `engines.py` contains the available engine definitions.
 - `simulation.py` contains the physics loop, drag calculation, validation, and
-	telemetry result types.
+  telemetry result types.
 - `gearbox.py` defines gear ratios, final drive, efficiency, and shift behaviour.
 - `brakes.py` defines brake systems, heat buildup, efficiency, and fade.
 - `ui/app.py` contains the button-driven desktop application.
@@ -195,20 +195,20 @@ The current catalogue contains:
 - `Brick Mk1`: a heavier Lion-powered prototype with a larger frontal area.
 - `Blue Bird 1927`: a lighter, more aerodynamic Lion-powered configuration.
 - `Jeantaud`: a 1,400 kg Welch Hemi-powered prototype with estimated
-	`Cd=0.95` and `1.7 m^2` frontal area.
+  `Cd=0.95` and `1.7 m^2` frontal area.
 - `Campbell-Napier-Railton Blue Bird`: a 1931, 3,600 kg car using the Napier
-	Lion, with `Cd=0.55`, `2.3 m^2` frontal area, and `0.50 m` wheel radius.
+  Lion, with `Cd=0.55`, `2.3 m^2` frontal area, and `0.50 m` wheel radius.
 - `Irving-Napier Golden Arrow`: Major Segrave's 1929 streamlined record car,
-	using the Rolls-Royce R and Golden Arrow 3-Speed LSR gearbox. Its recorded
-	dimensions are 8.43 m long, 1.14 m high, with a 4.07 m wheelbase and 3,661 kg
-	mass.
+  using the Rolls-Royce R and Golden Arrow 3-Speed LSR gearbox. Its recorded
+  dimensions are 8.43 m long, 1.14 m high, with a 4.07 m wheelbase and 3,661 kg
+  mass.
 - `Stanley Steamer Rocket`: a 1906 steam-powered record car using a two-cylinder
-	150 hp steam engine and direct-drive transmission. It is 4.74 m long and
-	0.93 m high, weighs 1,000 kg, and has a 2.49 m wheelbase; remaining prototype
-	figures will be refined as historical source data is added.
+  150 hp steam engine and direct-drive transmission. It is 4.74 m long and
+  0.93 m high, weighs 1,000 kg, and has a 2.49 m wheelbase; remaining prototype
+  figures will be refined as historical source data is added.
 - `Darracq 1905`: a 1,000 kg car with a 200 hp, 25.422-litre V8, two-speed
-	gearbox with a `2.0` final drive, weak mechanical drum brakes, `Cd=0.75`, and
-	`1.9 m^2` frontal area. Its prototype gearbox efficiency is set to 85%.
+  gearbox with a `2.0` final drive, weak mechanical drum brakes, `Cd=0.75`, and
+  `1.9 m^2` frontal area. Its prototype gearbox efficiency is set to 85%.
 
 Build custom cars from unlocked chassis, engines, transmissions, and historically
 available brakes in the Garage. The builder assigns a vehicle name automatically;
@@ -326,25 +326,196 @@ wind tunnels and all the useful data they provide.
 
 ## Direction
 
-The next major systems are likely to include:
+Project Bonneville has evolved from a land speed record simulator into an engineering and management game about the history of world land speed record attempts. The simulator, campaign, research, reliability, and vehicle design systems now form a solid foundation for future development.
 
-- Historical vehicles, teams, locations, and record progression
-- Research and Development - Tech Trees?
-	Engine trees have started to be implemented
-- Ability to download .csv files of the telemetry
-- Technology research and upgrade choices
-- Sponsorship, funding, stakeholder set goals
-- More detailed engine, tyre, braking, and stability models
-- Risk and failure during test runs
-- More useful run summaries and visual telemetry
-- Optional BeamNG or Unity integration
-- Eventually I'd like to see simulations of the runs rendered in Unity and even allow the player to pilot the car
-- Real rules will apply, two runs in opposite directions within one hour
-- Rather than choosing complete vehicles, eventually allow:
-	Chassis
-	Engine
-	Gearbox
-	Tyres
-	Bodywork
-- to be swapped independently.
-- The current architecture already supports this direction quite well
+### Completed or Largely Implemented
+
+#### Historical Content
+
+- Historical vehicles, engines, tracks, and record progression
+- Persistent campaign records and historical run tracking
+- Historically themed technology eras and research progression
+
+#### Research & Development
+
+- Multi-turn engineering projects
+- Research prerequisites and unlock chains
+- Aerodynamics, chassis, engine, tyre, and brake technology progression
+- Technology era structure supporting future expansion
+
+#### Vehicle Engineering
+
+- Vehicle designer allows selection of:
+	- Chassis
+	- Engine
+	- Gearbox
+	- Brakes
+- Engine tuning system
+- Gearbox tuning system
+- Modular vehicle architecture supporting future component expansion
+
+#### Campaign Management
+
+- Persistent campaign state
+- Team management framework
+- Engineers and mechanics
+- Funding and operating costs
+- Sponsorship foundations
+- Progression through time and technology eras
+
+#### Simulation
+
+- Multi-speed gearboxes
+- Torque and gearing effects
+- Aerodynamic drag
+- Rolling resistance
+- Tyre grip modelling
+- Brake performance and fade
+- Reliability and mechanical failures
+- Historical record attempts
+- Telemetry and graphical outputs
+
+### Current Development Priorities
+
+#### Rival Teams and Historical Competition
+
+Introduce competing land speed record teams.
+
+Examples:
+
+- Campbell Blue Bird Team
+- Segrave Team
+- Cobb Team
+- Breedlove Team
+- Thrust Programme
+
+Rivals should actively pursue records and create pressure on the player to innovate and respond.
+
+#### Sponsorship and Stakeholder Pressure
+
+Expand sponsorship into a genuine management system.
+
+Examples:
+
+- Sponsorship contracts
+- Record-breaking objectives
+- Publicity targets
+- Financial objectives
+- Reputation effects
+
+Players should balance engineering goals against commercial pressures.
+
+#### Workshop and Team Development
+
+Expand team management.
+
+Potential features:
+
+- Hiring engineers
+- Hiring mechanics
+- Specialist designers
+- Aerodynamicists
+- Workshop upgrades
+- Wind tunnel access
+- Testing facilities
+
+#### Bodywork and Aerodynamics
+
+Expand vehicle design beyond core mechanical components.
+
+Allow independent selection of:
+
+- Nose designs
+- Cockpit types
+- Wheel fairings
+- Bodywork packages
+- Streamlining concepts
+- Tail configurations
+
+Vehicle appearance should evolve visually with research.
+
+#### 16-Bit Vehicle Presentation
+
+Introduce a retro-inspired visual presentation layer.
+
+Features:
+
+- Side-profile pixel-art vehicles
+- Layered sprite system
+- Vehicle appearance changes based on research and upgrades
+- Visible progression from primitive pioneers to rocket cars
+- Dashboard and telemetry inspired by classic management games
+
+#### Improved Event System
+
+Introduce campaign events.
+
+Examples:
+
+- Engine failures
+- Sponsorship offers
+- Driver injuries
+- Funding shortages
+- Breakthrough discoveries
+- Rival record announcements
+
+The campaign should generate unique stories each playthrough.
+
+### Future Development
+
+#### FIA and Historical Record Rules
+
+Implement authentic record procedures.
+
+Examples:
+
+- Two runs in opposite directions
+- One-hour turnaround requirement
+- Class-specific records
+- Timing authority verification
+- International regulations
+
+#### Advanced Simulation
+
+Potential future additions:
+
+- Dynamic tyre temperatures
+- Tyre growth at speed
+- Crosswinds
+- Aerodynamic lift
+- Stability modelling
+- Weight transfer
+- Surface condition effects
+
+#### Telemetry Export
+
+- Export telemetry to CSV
+- External analysis support
+- Engineering reports
+- Run comparison tools
+
+#### Optional External Integration
+
+Potential future integrations:
+
+- BeamNG vehicle validation
+- Unity visualisation
+- 3D replay generation
+- Player-driven record attempts
+
+These would complement, rather than replace, the core management game.
+
+### Long-Term Vision
+
+Project Bonneville ultimately becomes a management and engineering simulation covering the entire history of land speed record competition, from primitive pioneer machines in the 1890s through streamliners, aircraft-engined monsters, jet cars, rocket cars, and future record technologies.
+
+The focus remains on balancing:
+
+- Engineering innovation
+- Reliability
+- Funding
+- Team management
+- Historical competition
+- Risk
+
+while pursuing the world land speed record across more than a century of technological evolution.
