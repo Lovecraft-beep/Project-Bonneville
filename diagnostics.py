@@ -3,8 +3,10 @@
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from math import pi
 from pathlib import Path
 
+from gearbox import estimate_power_limited_speed_mph
 from research import (
     AERODYNAMICS_TECHNOLOGY_TREE,
     BRAKE_TECHNOLOGY_TREE,
@@ -30,70 +32,153 @@ class RunDiagnosis:
 
 @dataclass(frozen=True)
 class GearRatioSuggestion:
-    gear_index: int | None
-    delta: float
+    final_drive: float
+    gears: tuple[float, ...]
     description: str
+    changes_needed: bool = True
 
 
-def suggest_gear_ratio_adjustment(vehicle, result):
-    """Offer a small, telemetry-based gearbox adjustment for the next run."""
+# Mechanics work by eye and feel, so ratios are only set to the nearest 0.05.
+MECHANIC_RATIO_STEP = 0.05
+MECHANIC_EXTRA_LEGS = 1.10
+
+
+def _mechanic_round(ratio, low, high):
+    stepped = round(ratio / MECHANIC_RATIO_STEP) * MECHANIC_RATIO_STEP
+    return round(min(high, max(low, stepped)), 2)
+
+
+def _peak_power_rpm(engine):
+    rpms = [engine.max_rpm * fraction / 100 for fraction in range(30, 99)]
+    return max(rpms, key=lambda rpm: engine.torque_at_rpm(rpm) * rpm)
+
+
+def _rpm_at_speed(speed_mph, overall_ratio, wheel_radius_m):
+    speed_mps = speed_mph / 2.23694
+    return speed_mps / (2 * pi * wheel_radius_m) * 60 * overall_ratio
+
+
+def suggest_gear_ratio_adjustment(vehicle, result, track_friction_factor=1.0):
+    """Suggest a full set of ratios matched to the engine's power and torque."""
     gearbox = vehicle.gearbox
-    if gearbox.gear_count < 2 or not result.telemetry:
+    engine = vehicle.engine
+    if (
+        gearbox.gear_count < 2
+        or engine.torque_curve_type in ("turbojet", "rocket")
+        or not result.telemetry
+    ):
+        return None
+    driven = [
+        sample for sample in result.telemetry
+        if getattr(sample, "phase", "accelerating") != "decelerating"
+    ] or result.telemetry
+    peak_sample = max(driven, key=lambda sample: sample.speed_mph)
+    if peak_sample.speed_mph <= 0:
         return None
 
-    peak_sample = max(result.telemetry, key=lambda sample: sample.speed_mph)
-    final_drive = gearbox.final_drive_ratio
-    first_gear = gearbox.gears[0]
-    if (
+    radius = vehicle.wheel_radius_m
+    top_gear = gearbox.gears[-1]
+    power_rpm = _peak_power_rpm(engine)
+    still_accelerating = getattr(peak_sample, "acceleration_g", 0.0) >= 0.02
+    rev_limited = (
         peak_sample.gear == gearbox.gear_count
-        and peak_sample.engine_rpm >= vehicle.engine.max_rpm * 0.88
-        and final_drive > 0.5
-    ):
-        return GearRatioSuggestion(
-            None,
-            -0.1,
-            "Lengthen the final drive (-0.1) to leave more top-end RPM headroom.",
+        and peak_sample.engine_rpm >= engine.max_rpm * 0.93
+        and not still_accelerating
+    )
+    target_speed = peak_sample.speed_mph
+    target_rpm = power_rpm
+    if rev_limited:
+        target_speed = max(
+            target_speed,
+            min(
+                estimate_power_limited_speed_mph(vehicle, engine),
+                target_speed * MECHANIC_EXTRA_LEGS,
+            ),
         )
+    elif still_accelerating:
+        # Track ran out before the car did: use the whole rev range in top.
+        target_rpm = engine.max_rpm * 0.95
 
-    if (
-        any(sample.gear == 1 and sample.wheelspin for sample in result.telemetry)
-        and first_gear > 0.5
-    ):
-        return GearRatioSuggestion(
-            0,
-            -0.1,
-            "Try a taller first gear (-0.1) to soften wheelspin off the line.",
-        )
+    overall_top = target_rpm / _rpm_at_speed(target_speed, 1.0, radius)
+    final_drive = _mechanic_round(overall_top / top_gear, 0.5, 6.0)
+    top_gear = _mechanic_round(overall_top / final_drive, 0.5, 5.0)
 
-    if (
-        result.average_acceleration_g < 0.1
-        and result.wheelspin_event_count == 0
-        and first_gear < 5.0
-    ):
-        return GearRatioSuggestion(
-            0,
-            0.1,
-            "Try a shorter first gear (+0.1) for stronger launch pull.",
-        )
+    # First gear: peak torque just reaches the tyres' grip limit.
+    traction_force = (
+        vehicle.tyre_grip_factor * track_friction_factor * vehicle.mass * 9.81
+    )
+    first_gear = _mechanic_round(
+        traction_force * radius
+        / (engine.torque_nm * final_drive * gearbox.efficiency),
+        min(5.0, top_gear * 1.2),
+        5.0,
+    )
 
-    if (
-        peak_sample.gear == gearbox.gear_count
-        and peak_sample.engine_rpm < vehicle.engine.max_rpm * 0.7
-        and final_drive < 6.0
-    ):
-        return GearRatioSuggestion(
-            None,
-            0.1,
-            "Shorten the final drive (+0.1) to bring engine RPM closer to its power band.",
-        )
+    # Middle gears: even geometric steps so each shift lands at the same RPM drop.
+    count = gearbox.gear_count
+    step = (top_gear / first_gear) ** (1 / (count - 1))
+    gears = tuple(
+        _mechanic_round(first_gear * step**index, 0.5, 5.0)
+        for index in range(count - 1)
+    ) + (top_gear,)
 
-    if first_gear < 5.0:
-        return GearRatioSuggestion(
-            0,
-            0.1,
-            "Try a shorter first gear (+0.1) for stronger launch pull.",
+    changes_needed = (
+        abs(final_drive - gearbox.final_drive_ratio) >= MECHANIC_RATIO_STEP
+        or any(
+            abs(new - old) >= MECHANIC_RATIO_STEP
+            for new, old in zip(gears, gearbox.gears)
         )
-    return None
+    )
+    peak_rpm_now = peak_sample.engine_rpm
+    if rev_limited:
+        top_note = (
+            f"She sat on the rev limit in top at {peak_sample.speed_mph:.0f} mph "
+            f"({peak_rpm_now:,.0f} rpm). Gear her for about {target_speed:.0f} mph "
+            f"with best power near {power_rpm:,.0f} rpm."
+        )
+    elif still_accelerating:
+        top_note = (
+            f"She was still pulling at {peak_sample.speed_mph:.0f} mph "
+            f"({peak_rpm_now:,.0f} rpm in gear {peak_sample.gear}) when the course ran out. "
+            f"Gear her to finish near {target_rpm:,.0f} rpm in top."
+        )
+    else:
+        top_note = (
+            f"She topped out at {peak_sample.speed_mph:.0f} mph turning "
+            f"{peak_rpm_now:,.0f} rpm in gear {peak_sample.gear}; best power is "
+            f"near {power_rpm:,.0f} rpm."
+        )
+    shift_rpm = min(gearbox.shift_up_rpm, engine.max_rpm * 0.90)
+    drop_rpm = shift_rpm * step
+    torque_rpm = max(
+        (engine.max_rpm * fraction / 100 for fraction in range(10, 99)),
+        key=engine.torque_at_rpm,
+    )
+    spacing_note = (
+        f" Each upshift drops to about {drop_rpm:,.0f} rpm, "
+        + (
+            "right in the torque band."
+            if drop_rpm >= torque_rpm * 0.85
+            else "below the torque band, so she bogs down after each change. "
+            "The gaps are too wide for this box; a gearbox with more speeds would help."
+        )
+    )
+    if not changes_needed:
+        return GearRatioSuggestion(
+            gearbox.final_drive_ratio,
+            tuple(gearbox.gears),
+            f"{top_note} The current ratios are about where I'd set them.",
+            changes_needed=False,
+        )
+    ratio_list = " / ".join(f"{ratio:.2f}" for ratio in gears)
+    current_list = " / ".join(f"{ratio:.2f}" for ratio in gearbox.gears)
+    return GearRatioSuggestion(
+        final_drive,
+        gears,
+        f"{top_note} Final drive {gearbox.final_drive_ratio:.2f} -> {final_drive:.2f}. "
+        f"Gears {current_list} -> {ratio_list}; first gear puts peak torque "
+        f"right at the tyres' grip.{spacing_note}",
+    )
 
 
 def diagnose_run(vehicle, result):
@@ -293,6 +378,11 @@ def _vehicle_details(vehicle):
             "efficiency": vehicle.brakes.efficiency,
         },
     }
+
+
+def clear_diagnostic_log(path=DIAGNOSTIC_LOG_FILE):
+    """Delete the diagnostic log so a new campaign starts with a clean history."""
+    path.unlink(missing_ok=True)
 
 
 def reset_vehicle_log(vehicle):

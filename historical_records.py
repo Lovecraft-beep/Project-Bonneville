@@ -50,6 +50,12 @@ def next_historical_target(current_year, completed_record_ids):
     return None
 
 
+def current_world_record(year):
+    """Return the fastest historical record set on or before the given year."""
+    standing = [target for target in HISTORICAL_TARGETS if target.year <= year]
+    return max(standing, key=lambda target: target.speed_mph, default=None)
+
+
 def required_record_runs(year):
     """Return the official pass count under the rules effective that year."""
     return 1 if year <= 1923 else 2

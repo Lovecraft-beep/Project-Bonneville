@@ -16,7 +16,9 @@ from campaign_world import (
     create_world_state,
 )
 from historical_records import (
+    HISTORICAL_TARGETS,
     average_record_speed,
+    current_world_record,
     next_historical_target,
     record_ids_achieved_by_speed,
     required_record_runs,
@@ -31,7 +33,15 @@ from research import (
     GEARBOX_TECHNOLOGY_BY_ID,
     TYRE_TECHNOLOGY_BY_ID,
 )
-from sponsors import SPONSOR_BY_ID
+from sponsors import (
+    RUNS_OBJECTIVE,
+    SPEED_OBJECTIVE,
+    SPONSOR_BY_ID,
+    SPONSOR_OBJECTIVE_DEADLINE_TURNS,
+)
+
+SPONSOR_OBJECTIVE_REPUTATION_GAIN = 0.5
+SPONSOR_DEPARTURE_REPUTATION_LOSS = 1.0
 
 CAMPAIGN_FILE = Path(__file__).with_name("campaign_state.json")
 STARTING_FUNDS_GBP = 100_000.0
@@ -42,6 +52,7 @@ MECHANIC_HIRE_COST_GBP = 5_000.0
 WORKSHOP_UPGRADE_BASE_COST_GBP = 10_000.0
 TRACKSIDE_ADJUSTMENT_COST_GBP = 5.0
 MAX_TESTS_PER_SESSION = 8
+MAX_RECORD_RUNS_PER_SESSION = 8
 
 
 @dataclass
@@ -131,10 +142,31 @@ class ResearchState:
 
 
 @dataclass
+class SponsorObjective:
+    """The current demand a sponsor has set, with turns left to meet it."""
+
+    sponsor_id: str
+    kind: str
+    target: float
+    reward_gbp: float
+    turns_remaining: int = SPONSOR_OBJECTIVE_DEADLINE_TURNS
+    runs_at_issue: int = 0
+
+
+@dataclass
 class SponsorshipState:
     """Sponsors signed by the team."""
 
     active_sponsors: list[str] = field(default_factory=list)
+    objectives: list[SponsorObjective] = field(default_factory=list)
+    departed_sponsors: list[str] = field(default_factory=list)
+    recent_departures: list[str] = field(default_factory=list)
+
+    def objective_for(self, sponsor_id):
+        return next(
+            (item for item in self.objectives if item.sponsor_id == sponsor_id),
+            None,
+        )
 
     def has_sponsor(self, sponsor_id):
         return sponsor_id in self.active_sponsors
@@ -218,10 +250,13 @@ class CampaignState:
     current_day_of_year: int = 1
     turn_number: int = 1
     tests_this_session: int = 0
+    record_runs_this_session: int = 0
+    workshop_repair_pending: bool = False
     venues_paid_this_session: list[str] = field(default_factory=list)
     completed_runs: int = 0
     failed_runs: int = 0
     best_measured_mile_speed_mph: float = 0.0
+    official_record_mph: float = 0.0
     completed_historical_record_ids: list[str] = field(default_factory=list)
     world: WorldState = field(default_factory=create_world_state)
 
@@ -300,7 +335,12 @@ def load_campaign(path=CAMPAIGN_FILE):
             EngineeringProject(**project)
             for project in data.get("engineering_projects", [])
         ]
-        data["sponsorship"] = SponsorshipState(**data.get("sponsorship", {}))
+        sponsorship_data = dict(data.get("sponsorship", {}))
+        sponsorship_data["objectives"] = [
+            SponsorObjective(**objective)
+            for objective in sponsorship_data.get("objectives", [])
+        ]
+        data["sponsorship"] = SponsorshipState(**sponsorship_data)
         garage_data = data.get("garage", {})
         data["garage"] = Garage(
             vehicles=[
@@ -329,7 +369,12 @@ def load_campaign(path=CAMPAIGN_FILE):
             reactions=world_data.get("reactions", []),
             historical_events_seen=world_data.get("historical_events_seen", []),
         )
-        return CampaignState(**data)
+        campaign = CampaignState(**data)
+        # Saves from before sponsor objectives existed need a first demand per sponsor.
+        for sponsor_id in campaign.sponsorship.active_sponsors:
+            if campaign.sponsorship.objective_for(sponsor_id) is None:
+                issue_sponsor_objective(campaign, sponsor_id)
+        return campaign
 
     # Migrate campaign files written before Team became the owner of cash.
     team = Team(cash=data.pop("funds_gbp", STARTING_FUNDS_GBP))
@@ -384,6 +429,9 @@ def complete_run(
             campaign.completed_historical_record_ids.extend(
                 newly_completed_record_ids
             )
+            campaign.official_record_mph = max(
+                campaign.official_record_mph, round(record_speed_mph, 1)
+            )
             reputation_gain += len(newly_completed_record_ids)
             campaign.world.headlines.append(
                 f"RECORD BEATEN: {campaign.team.name} exceeds the {target.year} "
@@ -393,6 +441,112 @@ def complete_run(
     campaign.team.reputation = round(
         campaign.team.reputation + reputation_gain, 2
     )
+    return check_sponsor_objectives(campaign, measured_mile_speed_mph)
+
+
+def standing_world_record(campaign):
+    """Return (speed_mph, holder, year) for the record as it stands in this campaign."""
+    historical = current_world_record(campaign.current_year)
+    credited = [
+        target.speed_mph
+        for target in HISTORICAL_TARGETS
+        if target.record_id in campaign.completed_historical_record_ids
+    ]
+    # Older saves only know which historical marks were beaten, not the exact speed.
+    team_speed = max([campaign.official_record_mph, *credited])
+    if team_speed > 0 and (historical is None or team_speed >= historical.speed_mph):
+        return team_speed, campaign.team.name, campaign.current_year
+    if historical is None:
+        return None
+    return historical.speed_mph, historical.vehicle, historical.year
+
+
+def issue_sponsor_objective(campaign, sponsor_id):
+    """Set a sponsor's next demand; speed targets track the standing world record."""
+    sponsor = SPONSOR_BY_ID[sponsor_id]
+    if sponsor.objective_kind == SPEED_OBJECTIVE:
+        record = current_world_record(campaign.current_year) or HISTORICAL_TARGETS[0]
+        target = round(record.speed_mph * sponsor.objective_value, 1)
+    else:
+        target = int(sponsor.objective_value)
+    objective = SponsorObjective(
+        sponsor_id=sponsor_id,
+        kind=sponsor.objective_kind,
+        target=target,
+        reward_gbp=sponsor.objective_reward_gbp,
+        runs_at_issue=campaign.completed_runs,
+    )
+    campaign.sponsorship.objectives = [
+        item
+        for item in campaign.sponsorship.objectives
+        if item.sponsor_id != sponsor_id
+    ] + [objective]
+    return objective
+
+
+def sponsor_objective_progress(campaign, objective):
+    """Return (current, target) progress for display."""
+    if objective.kind == RUNS_OBJECTIVE:
+        return campaign.completed_runs - objective.runs_at_issue, objective.target
+    return campaign.best_measured_mile_speed_mph, objective.target
+
+
+def describe_sponsor_objective(campaign, objective):
+    current, target = sponsor_objective_progress(campaign, objective)
+    if objective.kind == RUNS_OBJECTIVE:
+        demand = f"Complete {target:.0f} successful runs ({min(current, target):.0f}/{target:.0f})"
+    else:
+        demand = f"Reach {target:.1f} mph on a measured mile"
+    turns = objective.turns_remaining
+    return (
+        f"{demand}  /  reward GBP {objective.reward_gbp:,.0f}  /  "
+        f"{turns} turn{'s' if turns != 1 else ''} left"
+    )
+
+
+def check_sponsor_objectives(campaign, measured_mile_speed_mph):
+    """Pay out objectives met by a completed run and issue each sponsor's next demand."""
+    messages = []
+    for objective in list(campaign.sponsorship.objectives):
+        if objective.kind == RUNS_OBJECTIVE:
+            met = campaign.completed_runs - objective.runs_at_issue >= objective.target
+        else:
+            met = measured_mile_speed_mph >= objective.target
+        if not met:
+            continue
+        sponsor = SPONSOR_BY_ID[objective.sponsor_id]
+        campaign.team.cash = round(campaign.team.cash + objective.reward_gbp, 2)
+        campaign.team.reputation = round(
+            campaign.team.reputation + SPONSOR_OBJECTIVE_REPUTATION_GAIN, 2
+        )
+        issue_sponsor_objective(campaign, objective.sponsor_id)
+        messages.append(
+            f"{sponsor.name} objective met: GBP {objective.reward_gbp:,.0f} paid."
+        )
+    return messages
+
+
+def _expire_sponsor_objectives(campaign):
+    sponsorship = campaign.sponsorship
+    sponsorship.recent_departures = []
+    for objective in list(sponsorship.objectives):
+        objective.turns_remaining -= 1
+        if objective.turns_remaining > 0:
+            continue
+        sponsor = SPONSOR_BY_ID[objective.sponsor_id]
+        sponsorship.objectives.remove(objective)
+        if objective.sponsor_id in sponsorship.active_sponsors:
+            sponsorship.active_sponsors.remove(objective.sponsor_id)
+        if objective.sponsor_id not in sponsorship.departed_sponsors:
+            sponsorship.departed_sponsors.append(objective.sponsor_id)
+        sponsorship.recent_departures.append(sponsor.name)
+        campaign.team.reputation = round(
+            max(0.0, campaign.team.reputation - SPONSOR_DEPARTURE_REPUTATION_LOSS), 2
+        )
+        campaign.world.headlines.append(
+            f"{sponsor.name} withdraws its backing after {campaign.team.name} missed its target."
+        )
+        del campaign.world.headlines[:-8]
 
 
 def complete_failed_run(campaign, run_cost_gbp):
@@ -412,6 +566,8 @@ def advance_turn(campaign, days=365):
     )
     campaign.turn_number += 1
     campaign.tests_this_session = 0
+    campaign.record_runs_this_session = 0
+    campaign.workshop_repair_pending = False
     campaign.venues_paid_this_session = []
     elapsed_days = campaign.current_day_of_year - 1 + days
     campaign.current_year += elapsed_days // 365
@@ -430,23 +586,43 @@ def advance_turn(campaign, days=365):
         ]
     if campaign.current_year != previous_year:
         advance_world(campaign)
+    _expire_sponsor_objectives(campaign)
     return tuple(completed_projects)
 
 
 def register_test_run(campaign):
     """Record one hourly campaign test, enforcing the session limit."""
     if campaign.tests_this_session >= MAX_TESTS_PER_SESSION:
-        raise ValueError("test session is full; advance campaign time to start another")
+        raise ValueError("test session is full; end the turn to start another")
     campaign.tests_this_session += 1
     return campaign.tests_this_session
 
 
-def end_test_session(campaign):
-    """End track operations and clear this session's hourly slots and venue fees."""
-    if campaign.record_attempt is not None:
-        raise ValueError("complete or abandon the official record attempt first")
-    campaign.tests_this_session = 0
-    campaign.venues_paid_this_session.clear()
+def register_record_run(campaign):
+    """Record one official record pass against this turn's record session."""
+    if campaign.record_runs_this_session >= MAX_RECORD_RUNS_PER_SESSION:
+        raise ValueError("record session is full; end the turn to start another")
+    campaign.record_runs_this_session += 1
+    return campaign.record_runs_this_session
+
+
+def session_runs_remaining(campaign, record=False):
+    """Return the runs left this turn in the test or record session."""
+    if record:
+        return MAX_RECORD_RUNS_PER_SESSION - campaign.record_runs_this_session
+    return MAX_TESTS_PER_SESSION - campaign.tests_this_session
+
+
+def lapse_record_attempt_if_out_of_runs(campaign):
+    """Cancel an attempt whose remaining passes no longer fit the record session."""
+    attempt = campaign.record_attempt
+    if attempt is None:
+        return False
+    passes_needed = attempt.required_runs - len(attempt.speeds_mph)
+    if session_runs_remaining(campaign, record=True) >= passes_needed:
+        return False
+    campaign.record_attempt = None
+    return True
 
 
 _ENGINEERING_PROJECT_BRANCHES = {
@@ -454,7 +630,7 @@ _ENGINEERING_PROJECT_BRANCHES = {
         ENGINE_TECHNOLOGY_BY_ID,
         "engine_technology",
         "_complete_engine_technology",
-        ("engine_technology", "chassis_technology"),
+        ("engine_technology", "chassis_technology", "aerodynamics_technology"),
     ),
     "chassis": (
         CHASSIS_TECHNOLOGY_BY_ID,
@@ -546,11 +722,14 @@ def sign_sponsor(campaign, sponsor_id):
         raise ValueError(f"unknown sponsor: {sponsor_id}")
     if campaign.sponsorship.has_sponsor(sponsor_id):
         raise ValueError(f"{sponsor.name} has already been signed")
+    if sponsor_id in campaign.sponsorship.departed_sponsors:
+        raise ValueError(f"{sponsor.name} has withdrawn and will not return")
     if campaign.team.reputation < sponsor.reputation_required:
         raise ValueError(f"not enough reputation to sign {sponsor.name}")
 
     campaign.sponsorship.add_sponsor(sponsor_id)
     campaign.team.cash = round(campaign.team.cash + sponsor.signing_bonus_gbp, 2)
+    return issue_sponsor_objective(campaign, sponsor_id)
 
 
 def reset_campaign(path=CAMPAIGN_FILE):
@@ -631,6 +810,20 @@ def adjust_vehicle_ratio_trackside(campaign, garage_entry, gear_index, delta):
     _charge_trackside_adjustment(campaign)
     garage_entry.gearbox_ratios = tuple(gearbox.gears)
     garage_entry.gearbox_final_drive = gearbox.final_drive_ratio
+
+
+def apply_gear_ratios_trackside(campaign, garage_entry, gears, final_drive):
+    """Fit a complete set of ratios for one trackside service charge."""
+    _require_active_garage_vehicle(campaign, garage_entry)
+    gearbox = AVAILABLE_GEARBOXES[garage_entry.gearbox_name]
+    if len(gears) != gearbox.gear_count:
+        raise ValueError("ratio set does not match this gearbox")
+    if not 0.5 <= final_drive <= 6.0 or any(not 0.5 <= ratio <= 5.0 for ratio in gears):
+        raise ValueError("requested ratio is outside the adjustment limits")
+
+    _charge_trackside_adjustment(campaign)
+    garage_entry.gearbox_ratios = tuple(gears)
+    garage_entry.gearbox_final_drive = final_drive
 
 
 def fit_trackside_tyres(campaign, garage_entry):

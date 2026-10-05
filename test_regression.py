@@ -6,6 +6,8 @@ management, research, garage reconstruction, sponsorship, save/load, and
 historical challenge systems that aren't covered elsewhere.
 """
 
+import math
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,11 +52,15 @@ from management import (
     Team,
     advance_turn,
     adjust_vehicle_ratio_trackside,
+    apply_gear_ratios_trackside,
     build_vehicle,
     calculate_run_cost,
     calculate_session_run_cost,
     complete_run,
-    end_test_session,
+    lapse_record_attempt_if_out_of_runs,
+    MAX_RECORD_RUNS_PER_SESSION,
+    register_record_run,
+    session_runs_remaining,
     fit_trackside_tyres,
     fit_trackside_brakes,
     MAX_TESTS_PER_SESSION,
@@ -138,41 +144,76 @@ class TestSessionTests(unittest.TestCase):
 
         self.assertEqual(campaign.tests_this_session, 0)
 
-    def test_ending_session_resets_test_count_and_venue_fees_without_advancing_turn(self):
-        campaign = CampaignState(tests_this_session=5)
-        mark_session_venue_paid(campaign, PUBLIC_ROADS)
-        starting_turn = campaign.turn_number
+    def test_record_runs_use_a_separate_session_reset_by_end_turn(self):
+        campaign = CampaignState(tests_this_session=MAX_TESTS_PER_SESSION)
+        for expected_count in range(1, MAX_RECORD_RUNS_PER_SESSION + 1):
+            self.assertEqual(register_record_run(campaign), expected_count)
+        self.assertEqual(session_runs_remaining(campaign, record=True), 0)
+        with self.assertRaisesRegex(ValueError, "record session is full"):
+            register_record_run(campaign)
 
-        end_test_session(campaign)
+        advance_turn(campaign, days=0)
 
+        self.assertEqual(campaign.record_runs_this_session, 0)
         self.assertEqual(campaign.tests_this_session, 0)
-        self.assertEqual(campaign.venues_paid_this_session, [])
-        self.assertEqual(campaign.turn_number, starting_turn)
-        self.assertEqual(calculate_session_run_cost(campaign, PUBLIC_ROADS), 200)
 
-    def test_cannot_end_session_during_pending_record_attempt(self):
+    def test_attempt_lapses_only_when_return_pass_cannot_fit(self):
         campaign = CampaignState(
+            record_runs_this_session=MAX_RECORD_RUNS_PER_SESSION - 1,
             record_attempt=CampaignRecordAttempt(
                 "target", "Car", "Track", 1924, 2, [200.0]
+            ),
+        )
+        self.assertFalse(lapse_record_attempt_if_out_of_runs(campaign))
+        self.assertIsNotNone(campaign.record_attempt)
+
+        register_record_run(campaign)
+
+        self.assertTrue(lapse_record_attempt_if_out_of_runs(campaign))
+        self.assertIsNone(campaign.record_attempt)
+
+
+class RecordChaseTests(unittest.TestCase):
+    def test_world_record_is_latest_standing_record_for_year(self):
+        from historical_records import current_world_record
+
+        self.assertIsNone(current_world_record(1895))
+        record_1908 = current_world_record(1908)
+        self.assertLessEqual(record_1908.year, 1908)
+        self.assertTrue(
+            all(
+                target.speed_mph <= record_1908.speed_mph
+                for target in HISTORICAL_TARGETS
+                if target.year <= 1908
             )
         )
-        with self.assertRaisesRegex(ValueError, "official record attempt"):
-            end_test_session(campaign)
 
-    def test_ui_end_session_saves_and_returns_to_garage(self):
-        from ui.app import BonnevilleApp
+    def test_standing_record_shows_team_once_it_holds_the_record(self):
+        from management import standing_world_record
 
-        campaign = CampaignState(tests_this_session=3)
-        mark_session_venue_paid(campaign, PUBLIC_ROADS)
-        app = SimpleNamespace(campaign=campaign, show_page=Mock())
+        campaign = CampaignState(current_year=1899)
+        historical_speed, holder, _ = standing_world_record(campaign)
+        self.assertNotEqual(holder, campaign.team.name)
 
-        with patch("ui.app.save_campaign") as save:
-            BonnevilleApp.end_current_test_session(app)
+        campaign.official_record_mph = historical_speed + 5.0
+        speed, holder, year = standing_world_record(campaign)
+        self.assertEqual((speed, holder, year), (historical_speed + 5.0, campaign.team.name, 1899))
 
-        self.assertEqual(campaign.tests_this_session, 0)
-        self.assertEqual(campaign.venues_paid_this_session, [])
-        save.assert_called_once_with(campaign)
-        app.show_page.assert_called_once_with("Garage")
+        legacy = CampaignState(
+            current_year=1899,
+            completed_historical_record_ids=[HISTORICAL_TARGETS[3].record_id],
+        )
+        self.assertEqual(standing_world_record(legacy)[1], legacy.team.name)
+
+    def test_gap_headline_reports_short_clear_and_complete(self):
+        from ui.app import record_gap_headline
+
+        target = HISTORICAL_TARGETS[0]
+        self.assertEqual(
+            record_gap_headline(target, target.speed_mph - 12.0), "12.0 mph short"
+        )
+        self.assertIn("clear", record_gap_headline(target, target.speed_mph + 3.0))
+        self.assertEqual(record_gap_headline(None, 500.0), "All records beaten")
 
 
 class VehicleNamingTests(unittest.TestCase):
@@ -284,9 +325,15 @@ class EngineTuningTests(unittest.TestCase):
         self.assertEqual(vehicle.engine.power_hp, tune_engine(NAPIER_LION, 2).power_hp)
 
     def test_tuned_engine_is_faster_and_riskier(self):
-        stock = build_vehicle_from_garage_entry(self._garage_entry())
-        tuned = build_vehicle_from_garage_entry(self._garage_entry(stage=3))
-        track = BONNEVILLE_SALT_FLATS
+        # The Napier car is grip-limited, so measure on the power-limited starting engine.
+        def pioneer_entry(stage):
+            entry = self._garage_entry(stage=stage)
+            entry.engine_name = PIONEER_SINGLE_CYLINDER.name
+            return entry
+
+        stock = build_vehicle_from_garage_entry(pioneer_entry(0))
+        tuned = build_vehicle_from_garage_entry(pioneer_entry(3))
+        track = PUBLIC_ROADS
         results = [
             run_simulation(
                 vehicle,
@@ -317,7 +364,7 @@ class FailureRepairTests(unittest.TestCase):
             show_page=Mock(),
             repair_failed_run_trackside=Mock(),
             rerun_failed_test=Mock(),
-            campaign=SimpleNamespace(tests_this_session=1),
+            campaign=SimpleNamespace(tests_this_session=1, record_runs_this_session=0),
             last_report=SimpleNamespace(
                 vehicle_name="Failure Test",
                 track_name=PUBLIC_ROADS.name,
@@ -716,7 +763,7 @@ class RecordAttemptTests(unittest.TestCase):
         from ui.app import BonnevilleApp
 
         campaign = CampaignState(current_year=1924)
-        campaign.tests_this_session = MAX_TESTS_PER_SESSION - 1
+        campaign.record_runs_this_session = MAX_RECORD_RUNS_PER_SESSION - 1
         app = SimpleNamespace(
             campaign=campaign,
             garage_return_required=False,
@@ -838,16 +885,23 @@ class TracksideServiceTests(unittest.TestCase):
         self.assertEqual(entry.brakes_name, "Hydraulic disc brakes")
         self.assertEqual(campaign.team.cash, starting_cash - 5.0)
 
-    def test_mechanic_suggests_lengthening_final_drive_near_redline(self):
+    def test_mechanic_suggests_lengthening_final_drive_on_rev_limiter(self):
         vehicle = AVAILABLE_CARS["1"]()
         vehicle.gearbox.gears = (3.0, 2.0)
+        redline_rpm = vehicle.engine.max_rpm * 0.95
+        overall = 2.0 * vehicle.gearbox.final_drive_ratio
+        speed_mph = (
+            redline_rpm / 60 / overall * 2 * math.pi * vehicle.wheel_radius_m * 2.23694
+        )
         result = SimpleNamespace(
             telemetry=[
                 SimpleNamespace(
-                    speed_mph=100.0,
-                    engine_rpm=int(vehicle.engine.max_rpm * 0.95),
+                    speed_mph=speed_mph,
+                    engine_rpm=int(redline_rpm),
                     gear=2,
                     wheelspin=False,
+                    acceleration_g=0.0,
+                    phase="measured mile",
                 )
             ],
             average_acceleration_g=0.2,
@@ -856,9 +910,54 @@ class TracksideServiceTests(unittest.TestCase):
 
         suggestion = suggest_gear_ratio_adjustment(vehicle, result)
 
-        self.assertEqual(suggestion.gear_index, None)
-        self.assertEqual(suggestion.delta, -0.1)
-        self.assertIn("Lengthen the final drive", suggestion.description)
+        self.assertTrue(suggestion.changes_needed)
+        self.assertEqual(len(suggestion.gears), 2)
+        self.assertLess(
+            suggestion.gears[-1] * suggestion.final_drive,
+            vehicle.gearbox.gears[-1] * vehicle.gearbox.final_drive_ratio,
+        )
+        self.assertGreater(suggestion.gears[0], suggestion.gears[1])
+        self.assertIn("rev limit", suggestion.description)
+
+    def test_mechanic_suggestion_improves_measured_mile(self):
+        vehicle = AVAILABLE_CARS["1"]()
+        track = PUBLIC_ROADS
+
+        def run(car):
+            return run_simulation(
+                car,
+                track_miles=track.length_miles,
+                measured_mile_start=track.measured_mile_start,
+                track_friction_factor=track.friction_factor,
+                air_density_kg_m3=track.air_density_kg_m3,
+            )
+
+        before = run(vehicle)
+        suggestion = suggest_gear_ratio_adjustment(
+            vehicle, before, track.friction_factor
+        )
+        vehicle.gearbox.gears = suggestion.gears
+        vehicle.gearbox.final_drive = suggestion.final_drive
+
+        self.assertGreater(
+            run(vehicle).measured_mile_speed_mph,
+            before.measured_mile_speed_mph,
+        )
+
+    def test_full_ratio_set_applies_for_one_trackside_charge(self):
+        campaign = CampaignState()
+        entry = self._garage_entry()
+        campaign.garage.vehicles.append(entry)
+        starting_cash = campaign.team.cash
+        gear_count = build_vehicle_from_garage_entry(entry).gearbox.gear_count
+        gears = tuple(round(2.0 - index * 0.3, 2) for index in range(gear_count))
+
+        apply_gear_ratios_trackside(campaign, entry, gears, 1.25)
+
+        rebuilt = build_vehicle_from_garage_entry(entry)
+        self.assertEqual(rebuilt.gearbox.gears, gears)
+        self.assertEqual(rebuilt.gearbox.final_drive_ratio, 1.25)
+        self.assertEqual(campaign.team.cash, starting_cash - 5.0)
 
     def test_trackside_screen_offers_ratio_steps_and_another_test(self):
         from ui.app import BonnevilleApp
@@ -868,6 +967,7 @@ class TracksideServiceTests(unittest.TestCase):
         app = BonnevilleApp.__new__(BonnevilleApp)
         app.campaign = CampaignState()
         app.last_run_is_sandbox = False
+        app.last_run_was_record_attempt = False
         app.last_vehicle_entry = entry
         app.last_vehicle = vehicle
         app.last_result = SimpleNamespace(
@@ -948,11 +1048,21 @@ class ResearchProjectSetupTests(unittest.TestCase):
         for branch in ("Engine", "Chassis", "Gearbox", "Tyres", "Brakes"):
             self.assertFalse(app._research_branch_available(branch), branch)
 
+    def test_first_engine_upgrade_opens_after_wind_deflector(self):
+        campaign = CampaignState()
+        app = self._research_app(campaign)
+        self.assertFalse(app._research_branch_available("Engine"))
+        complete_engineering_project(campaign, "aerodynamics", "wind_deflector")
+        self.assertTrue(app._research_branch_available("Engine"))
+        self.assertFalse(app._research_branch_available("Chassis"))
+        complete_engineering_project(campaign, "engine", "pioneer_engines")
+        self.assertIn(WELCH_HEMI, available_engines(campaign.research.engine_technology))
+
     def test_research_tabs_follow_completed_prerequisites(self):
         campaign = self._pioneer_aero_campaign()
         app = self._research_app(campaign)
         self.assertTrue(app._research_branch_available("Chassis"))
-        self.assertFalse(app._research_branch_available("Engine"))
+        self.assertTrue(app._research_branch_available("Engine"))
         complete_engineering_project(campaign, "chassis", "carriage_frame")
         for branch in ("Chassis", "Engine", "Tyres", "Brakes"):
             self.assertTrue(app._research_branch_available(branch), branch)
@@ -1007,6 +1117,7 @@ class EngineeringDiagnosisTests(unittest.TestCase):
                     last_run_outcome=None,
                     last_run_repaired=False,
                     show_page=Mock(), advance_campaign_turn=Mock(),
+                    offer_end_turn_after_failure=Mock(),
                 )
                 outcome = RunOutcome(0.25, failed, False, MISFIRE if failed else None)
                 with (
@@ -1030,6 +1141,26 @@ class EngineeringDiagnosisTests(unittest.TestCase):
                 self.assertFalse(app.last_run_is_sandbox)
                 self.assertEqual(save_record.call_count, 0 if failed else 1)
                 self.assertIsNone(app.last_record_message)
+                self.assertEqual(app.campaign.workshop_repair_pending, failed)
+                self.assertEqual(
+                    app.offer_end_turn_after_failure.call_count, 1 if failed else 0
+                )
+
+    def test_workshop_repair_blocks_testing_until_turn_ends(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState(workshop_repair_pending=True)
+        app = SimpleNamespace(campaign=campaign, garage_return_required=False)
+        with patch("ui.app.messagebox.showerror") as show_error, patch(
+            "ui.app.run_simulation"
+        ) as simulate:
+            BonnevilleApp.execute_run(app, object(), PUBLIC_ROADS)
+        show_error.assert_called_once()
+        simulate.assert_not_called()
+
+        advance_turn(campaign, days=0)
+
+        self.assertFalse(campaign.workshop_repair_pending)
 
     def test_facility_run_opens_debrief_without_changing_campaign(self):
         from ui.app import BonnevilleApp
@@ -1398,6 +1529,61 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sign_sponsor(campaign, SPONSOR_CATALOG[0].sponsor_id)
 
+    def test_speed_objective_tracks_world_record_and_pays_out(self):
+        from historical_records import current_world_record
+
+        campaign = CampaignState(current_year=1908)
+        objective = sign_sponsor(campaign, "local_investor")
+        record = current_world_record(1908)
+        self.assertAlmostEqual(objective.target, round(record.speed_mph * 0.8, 1))
+        cash_before = campaign.team.cash
+
+        messages = complete_run(campaign, 0, objective.target - 1.0)
+        self.assertEqual(messages, [])
+        messages = complete_run(campaign, 0, objective.target + 0.5)
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(campaign.team.cash, cash_before + objective.reward_gbp)
+        renewed = campaign.sponsorship.objective_for("local_investor")
+        self.assertIsNot(renewed, objective)
+        self.assertEqual(renewed.turns_remaining, 3)
+
+    def test_runs_objective_counts_runs_since_issue(self):
+        campaign = CampaignState(completed_runs=4)
+        objective = sign_sponsor(campaign, "castrol")
+        for _ in range(2):
+            self.assertEqual(complete_run(campaign, 0, 10.0), [])
+        self.assertEqual(len(complete_run(campaign, 0, 10.0)), 1)
+        self.assertEqual(objective.runs_at_issue, 4)
+
+    def test_missed_deadline_sponsor_withdraws_for_good(self):
+        campaign = CampaignState(current_year=1908)
+        campaign.team.reputation = 10.0
+        sign_sponsor(campaign, "shell")
+        for _ in range(2):
+            advance_turn(campaign, days=0)
+            self.assertIn("shell", campaign.sponsorship.active_sponsors)
+        advance_turn(campaign, days=0)
+
+        self.assertNotIn("shell", campaign.sponsorship.active_sponsors)
+        self.assertIn("shell", campaign.sponsorship.departed_sponsors)
+        self.assertEqual(campaign.sponsorship.recent_departures, ["Shell"])
+        self.assertEqual(campaign.team.reputation, 9.0)
+        self.assertEqual(campaign.sponsorship.income_per_turn_gbp, 0)
+        with self.assertRaisesRegex(ValueError, "withdrawn"):
+            sign_sponsor(campaign, "shell")
+
+    def test_sponsor_objectives_survive_save_and_load(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "campaign_state.json"
+            campaign = CampaignState()
+            sign_sponsor(campaign, "castrol")
+            save_campaign(campaign, path)
+            loaded = load_campaign(path)
+        objective = loaded.sponsorship.objective_for("castrol")
+        self.assertEqual(objective.target, 3)
+        self.assertEqual(objective.turns_remaining, 3)
+
     def test_campaign_save_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "campaign_state.json"
@@ -1440,6 +1626,16 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
             new_campaign = reset_campaign(path)
             self.assertFalse(path.exists())
             self.assertNotEqual(new_campaign.campaign_id, campaign.campaign_id)
+
+    def test_clear_diagnostic_log_removes_file_and_tolerates_missing(self):
+        from diagnostics import clear_diagnostic_log
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_path = Path(tmp_dir) / "test_vehicle_diagnostics.log"
+            log_path.write_text("old runs", encoding="utf-8")
+            clear_diagnostic_log(log_path)
+            self.assertFalse(log_path.exists())
+            clear_diagnostic_log(log_path)
 
     def test_records_save_load_and_display_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

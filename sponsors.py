@@ -2,6 +2,10 @@
 
 from dataclasses import dataclass
 
+SPONSOR_OBJECTIVE_DEADLINE_TURNS = 3
+SPEED_OBJECTIVE = "speed"
+RUNS_OBJECTIVE = "runs"
+
 
 @dataclass(frozen=True)
 class Sponsor:
@@ -12,6 +16,10 @@ class Sponsor:
     signing_bonus_gbp: float = 0.0
     income_per_turn_gbp: float = 0.0
     reliability_bonus: float = 0.0
+    # Speed objectives are a fraction of the standing world record; runs objectives are a count.
+    objective_kind: str = SPEED_OBJECTIVE
+    objective_value: float = 0.8
+    objective_reward_gbp: float = 5_000.0
 
 
 SPONSOR_CATALOG = (
@@ -20,6 +28,9 @@ SPONSOR_CATALOG = (
         "Local Investor",
         "A regional backer eager to attach their name to a record attempt.",
         signing_bonus_gbp=10_000.0,
+        objective_kind=SPEED_OBJECTIVE,
+        objective_value=0.80,
+        objective_reward_gbp=5_000.0,
     ),
     Sponsor(
         "castrol",
@@ -27,6 +38,9 @@ SPONSOR_CATALOG = (
         "Lubricant partnership improves engine reliability.",
         signing_bonus_gbp=3_000.0,
         reliability_bonus=0.03,
+        objective_kind=RUNS_OBJECTIVE,
+        objective_value=3,
+        objective_reward_gbp=3_000.0,
     ),
     Sponsor(
         "dunlop",
@@ -35,6 +49,9 @@ SPONSOR_CATALOG = (
         reputation_required=5.0,
         signing_bonus_gbp=2_000.0,
         reliability_bonus=0.04,
+        objective_kind=RUNS_OBJECTIVE,
+        objective_value=5,
+        objective_reward_gbp=4_000.0,
     ),
     Sponsor(
         "shell",
@@ -44,6 +61,9 @@ SPONSOR_CATALOG = (
         signing_bonus_gbp=5_000.0,
         income_per_turn_gbp=500.0,
         reliability_bonus=0.02,
+        objective_kind=SPEED_OBJECTIVE,
+        objective_value=0.90,
+        objective_reward_gbp=8_000.0,
     ),
     Sponsor(
         "napier",
@@ -51,6 +71,9 @@ SPONSOR_CATALOG = (
         "Close technical support from the engine manufacturer.",
         reputation_required=10.0,
         reliability_bonus=0.05,
+        objective_kind=SPEED_OBJECTIVE,
+        objective_value=0.95,
+        objective_reward_gbp=12_000.0,
     ),
     Sponsor(
         "government_grant",
@@ -59,18 +82,21 @@ SPONSOR_CATALOG = (
         reputation_required=15.0,
         signing_bonus_gbp=20_000.0,
         income_per_turn_gbp=1_000.0,
+        objective_kind=SPEED_OBJECTIVE,
+        objective_value=1.00,
+        objective_reward_gbp=25_000.0,
     ),
 )
 
 SPONSOR_BY_ID = {sponsor.sponsor_id: sponsor for sponsor in SPONSOR_CATALOG}
 
 
-def available_sponsors(reputation, active_sponsor_ids):
+def available_sponsors(reputation, active_sponsor_ids, departed_sponsor_ids=()):
     """Return sponsors the team can sign given its reputation."""
-    active_ids = set(active_sponsor_ids)
+    excluded_ids = set(active_sponsor_ids) | set(departed_sponsor_ids)
     return tuple(
         sponsor
         for sponsor in SPONSOR_CATALOG
-        if sponsor.sponsor_id not in active_ids
+        if sponsor.sponsor_id not in excluded_ids
         and reputation >= sponsor.reputation_required
     )

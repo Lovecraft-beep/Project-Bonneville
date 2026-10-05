@@ -416,6 +416,9 @@ def _build_trees(era_definitions):
                 for prerequisite in (previous_engine_id, required_chassis_id)
                 if prerequisite
             )
+            if not previous_engine_id:
+                # The first engine upgrade opens alongside the aero path, not after the chassis.
+                engine_prerequisites = ("wind_deflector",)
             engine_tree.append(
                 TechnologyNode(
                     engine_id,
@@ -644,14 +647,16 @@ def current_chassis_era(researched):
     return current_era(CHASSIS_TECHNOLOGY_TREE, researched)
 
 
-def available_engine_technologies(engine_researched, chassis_researched):
+def available_engine_technologies(engine_researched, chassis_researched, aerodynamics_researched=()):
     """Return engine technologies unlocked by engine and chassis progress.
 
     Unlike the chassis tree, engine technologies have no era gate of their
     own: they open purely once their prerequisites (which reference the
     previous engine tier and the matching chassis tier) have been researched.
     """
-    all_researched = set(engine_researched) | set(chassis_researched)
+    all_researched = (
+        set(engine_researched) | set(chassis_researched) | set(aerodynamics_researched)
+    )
     return tuple(
         node
         for node in ENGINE_TECHNOLOGY_TREE

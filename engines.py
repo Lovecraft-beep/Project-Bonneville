@@ -5,9 +5,9 @@ from dataclasses import dataclass, replace
 # (stage, label, power multiplier, reliability penalty)
 ENGINE_TUNE_STAGES = (
     (0, "Stock", 1.00, 0.00),
-    (1, "Stage 1 - Richer mixture and ignition advance", 1.04, 0.03),
-    (2, "Stage 2 - Raised compression", 1.08, 0.07),
-    (3, "Stage 3 - Maximum boost, minimal margin", 1.12, 0.12),
+    (1, "Stage 1 - Richer mixture and ignition advance", 1.08, 0.03),
+    (2, "Stage 2 - Raised compression", 1.16, 0.07),
+    (3, "Stage 3 - Maximum boost, minimal margin", 1.25, 0.12),
 )
 def next_engine_tune_stage(stage):
     """Return the next available tune stage, or None at the maximum."""
