@@ -1380,6 +1380,98 @@ class HistoricalChallengeRegressionTests(unittest.TestCase):
 
 
 class CampaignProgressionRegressionTests(unittest.TestCase):
+    def test_rivals_progress_during_research_and_survive_save_load(self):
+        from management import standing_world_record, start_engineering_project
+
+        campaign = CampaignState(current_year=1899)
+        start_engineering_project(campaign, "aerodynamics", "wind_deflector")
+        advance_turn(campaign)
+        advance_turn(campaign)
+        self.assertEqual(campaign.engineering_projects[0].turns_remaining, 1)
+        self.assertEqual(standing_world_record(campaign)[1], "Camille Jenatzy Team")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "campaign.json"
+            save_campaign(campaign, path)
+            restored = load_campaign(path)
+        self.assertEqual(restored.world, campaign.world)
+        self.assertEqual(standing_world_record(restored), standing_world_record(campaign))
+
+    def test_rival_attempt_occurs_on_date_without_waiting_for_new_year(self):
+        from management import standing_world_record
+
+        campaign = CampaignState(current_year=1899)
+        advance_turn(campaign, days=15)
+        self.assertNotIn("jenatzy_dogcart_1899", campaign.world.historical_attempts_seen)
+        advance_turn(campaign, days=1)
+        self.assertIn("jenatzy_dogcart_1899", campaign.world.historical_attempts_seen)
+        self.assertEqual(standing_world_record(campaign)[1], "Camille Jenatzy Team")
+
+    def test_player_reclaims_record_without_new_historical_milestone(self):
+        from management import standing_world_record
+
+        campaign = CampaignState(current_year=1908)
+        campaign.completed_historical_record_ids = [
+            target.record_id for target in HISTORICAL_TARGETS if target.speed_mph <= 130.0
+        ]
+        campaign.world.record_speed_mph = 130.0
+        campaign.world.record_holder = "Rival Team"
+        campaign.world.record_year = 1908
+        completed_ids = list(campaign.completed_historical_record_ids)
+        complete_run(campaign, 0, 130.01, is_record_attempt=True)
+        self.assertEqual(campaign.completed_historical_record_ids, completed_ids)
+        self.assertEqual(campaign.official_record_mph, 130.01)
+        self.assertEqual(standing_world_record(campaign)[1], campaign.team.name)
+        self.assertIn("WORLD RECORD:", campaign.world.headlines[-1])
+
+    def test_legacy_anonymous_rivals_migrate_without_losing_campaign_news(self):
+        import json
+
+        campaign = CampaignState(current_year=1899, current_day_of_year=365)
+        campaign.world.headlines = ["Existing campaign news"]
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "campaign.json"
+            save_campaign(campaign, path)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for key in ("historical_attempts_seen", "record_speed_mph", "record_holder", "record_year"):
+                del data["world"][key]
+            data["world"]["rivals"] = [{
+                "rival_id": "continental_union", "name": "Continental Union Auto Club",
+                "home": "France", "specialty": "early streamliners",
+                "performance_multiplier": 0.91, "best_speed_mph": 59.9,
+            }]
+            path.write_text(json.dumps(data), encoding="utf-8")
+            restored = load_campaign(path)
+        self.assertEqual(restored.world.headlines, ["Existing campaign news"])
+        self.assertEqual(restored.world.record_holder, "Camille Jenatzy Team")
+        self.assertFalse(any(rival.rival_id == "continental_union" for rival in restored.world.rivals))
+
+    def test_historical_rivals_take_record_but_cannot_beat_faster_player(self):
+        from campaign_world import advance_world
+
+        campaign = CampaignState(current_year=1899, current_day_of_year=365)
+        advance_world(campaign)
+        self.assertEqual(campaign.world.record_holder, "Camille Jenatzy Team")
+        self.assertEqual(campaign.world.record_speed_mph, 65.79)
+        self.assertTrue(any("WORLD RECORD:" in item for item in campaign.world.headlines))
+
+        player_campaign = CampaignState(current_year=1899, current_day_of_year=365)
+        player_campaign.official_record_mph = 100.0
+        advance_world(player_campaign)
+        self.assertEqual(player_campaign.world.record_speed_mph, 0.0)
+        self.assertFalse(any("WORLD RECORD:" in item for item in player_campaign.world.headlines))
+
+    def test_historical_attempts_are_not_repeated_and_skipped_years_are_replayed(self):
+        from campaign_world import advance_world
+
+        campaign = CampaignState(current_year=1905, current_day_of_year=365)
+        advance_world(campaign)
+        expected = [target.record_id for target in HISTORICAL_TARGETS if target.year <= 1905]
+        self.assertEqual(campaign.world.historical_attempts_seen, expected)
+        advance_world(campaign)
+        self.assertEqual(campaign.world.historical_attempts_seen, expected)
+        self.assertFalse(any("WORLD RECORD:" in item for item in campaign.world.headlines))
+
     def test_aerodynamics_is_the_initial_research_path(self):
         campaign = CampaignState()
         available_aero = available_aerodynamics_technologies(
@@ -1426,7 +1518,8 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         campaign = CampaignState(current_year=1926, current_day_of_year=360)
         advance_turn(campaign)
         self.assertEqual(campaign.current_year, 1927)
-        self.assertEqual(campaign.current_day_of_year, 360)
+        self.assertEqual(campaign.current_day_of_year, 1)
+        self.assertEqual(campaign.current_season, "Spring")
         self.assertTrue(campaign.world.reactions)
 
     def test_world_progression_creates_events_rivals_and_reactions(self):

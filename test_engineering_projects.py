@@ -14,6 +14,21 @@ from management import (
 
 
 class EngineeringProjectTests(unittest.TestCase):
+    def test_turns_cycle_four_seasons_before_advancing_year(self):
+        campaign = CampaignState()
+        self.assertEqual((campaign.current_season, campaign.current_year), ("Spring", 1895))
+        for season, year, day in (
+            ("Summer", 1895, 92),
+            ("Autumn", 1895, 183),
+            ("Winter", 1895, 274),
+            ("Spring", 1896, 1),
+            ("Summer", 1896, 92),
+        ):
+            advance_turn(campaign)
+            self.assertEqual((campaign.current_season, campaign.current_year), (season, year))
+            self.assertEqual(campaign.current_day_of_year, day)
+        self.assertEqual(campaign.turn_number, 6)
+
     def test_wind_deflector_takes_three_turns_and_reserves_engineer(self):
         campaign = CampaignState()
         starting_cash = campaign.team.cash
@@ -40,6 +55,7 @@ class EngineeringProjectTests(unittest.TestCase):
         completed = advance_turn(campaign)
 
         self.assertEqual(completed, ("wind_deflector",))
+        self.assertEqual((campaign.current_season, campaign.current_year), ("Winter", 1895))
         self.assertTrue(
             campaign.research.has_aerodynamics_technology("wind_deflector")
         )
@@ -59,6 +75,9 @@ class EngineeringProjectTests(unittest.TestCase):
         self.assertEqual(len(restored.engineering_projects), 1)
         self.assertEqual(restored.engineering_projects[0].turns_remaining, 2)
         self.assertEqual(restored.available_engineers, 0)
+        self.assertEqual((restored.current_season, restored.current_year), ("Summer", 1895))
+        advance_turn(restored)
+        self.assertEqual((restored.current_season, restored.current_year), ("Autumn", 1895))
         self.assertFalse(
             restored.research.has_aerodynamics_technology("wind_deflector")
         )

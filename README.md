@@ -70,10 +70,12 @@ time are saved with the campaign, and assigned engineers become available again
 at completion. The research screen shows cost, staffing, duration, prerequisites,
 and current progress before a project is started.
 
-The campaign uses strategic turns. Management actions advance the year, while a
-test run advances seven days. Active engineering projects progress whenever a
-turn advances, and the dashboard also allows a turn to pass without spending
-campaign funds.
+The campaign starts in Spring 1895 and uses four seasonal turns per year:
+Spring, Summer, Autumn, Winter, then Spring of the next year. Only **End turn**
+advances the season; research, management actions, and runs do not advance time.
+Each seasonal turn pays sponsor income, progresses engineering projects, updates
+rival attempts, and resets the test and record sessions. Seasons provide the
+calendar foundation for future weather effects; weather is not yet simulated.
 
 Test runs now include named failure risks: `Misfire`, `Oil leak`, `Gear
 failure`, `Tyre burst`, `Brake fade`, and `Steering vibration`. Failure
@@ -118,10 +120,11 @@ Completing Carriage Frame then unlocks these projects in their respective tabs:
 
 From a fresh campaign, this means nine turn advances before Carriage Frame can
 be started, and another three to complete it and open those branches. Starting a
-project in the desktop UI automatically advances its first turn; test runs and
-the dashboard's **Advance turn / save money** action also progress active
-projects. Research becomes available through completed prerequisites, not merely
-by reaching a particular calendar year.
+project does not advance time; **End turn** progresses active projects by one
+season. Wind Deflector started in Spring 1895 completes in Winter 1895, and the
+four opening projects can be completed by Spring 1898. Research becomes available
+through completed prerequisites, not merely by reaching a particular calendar
+year.
 
 The starting team has one engineer, and each opening project reserves that
 engineer until completion, so only one can run at a time. Later projects may
@@ -379,17 +382,20 @@ Project Bonneville has evolved from a land speed record simulator into an engine
 
 #### Rival Teams and Historical Competition
 
-Introduce competing land speed record teams.
+Historical rival teams now compete using the dated attempts in the curated
+40-record dataset. Jenatzy, Hemery, Segrave, Campbell, Eyston, Cobb, Breedlove,
+Arfons, Green, and the other recorded drivers enter the standings as they compete.
 
-Examples:
+Ending a turn progresses engineering projects and replays rival attempts whose
+historical dates have been reached, including attempts across skipped years.
+Funding research does not itself advance time. Quiet periods in the chronology
+remain preparation years; rival speeds are not randomly inflated.
 
-- Campbell Blue Bird Team
-- Segrave Team
-- Cobb Team
-- Breedlove Team
-- Thrust Programme
-
-Rivals should actively pursue records and create pressure on the player to innovate and respond.
+Rivals can take the world record, but cannot displace a faster official player
+record. Practice personal bests do not count as official records. The dashboard
+shows official team standings and record announcements, and a new rival world
+record triggers an end-turn notice. Standings, record ownership, and processed
+attempts survive save/load; older anonymous-rival saves migrate automatically.
 
 #### Sponsorship and Stakeholder Pressure
 

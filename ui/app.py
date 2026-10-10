@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 from brakes import BRAKE_CATALOG, available_brakes
 from cars import AVAILABLE_CARS
+from campaign_world import rival_standings
 from chassis import available_chassis
 from diagnostics import (
     append_run_log,
@@ -235,7 +236,7 @@ class BonnevilleApp(tk.Tk):
         )
         gap = record_gap_headline(target, self.campaign.best_measured_mile_speed_mph)
         self.header_status.configure(
-            text=f"{self.campaign.current_year}  /  TURN {self.campaign.turn_number}     GBP {self.campaign.team.cash:,.0f}     {gap.upper()}"
+            text=f"{self.campaign.current_season.upper()} {self.campaign.current_year}  /  TURN {self.campaign.turn_number}     GBP {self.campaign.team.cash:,.0f}     {gap.upper()}"
         )
 
     def show_page(self, name):
@@ -380,7 +381,7 @@ class BonnevilleApp(tk.Tk):
             page,
             "Operations / Season",
             f"{self.campaign.team.name}",
-            f"Turn {self.campaign.turn_number}  |  Day {self.campaign.current_day_of_year}, {self.campaign.current_year}  |  {self.campaign.completed_runs} completed runs  |  {self.campaign.failed_runs} failed",
+            f"{self.campaign.current_season} {self.campaign.current_year}  |  Turn {self.campaign.turn_number}  |  {self.campaign.completed_runs} completed runs  |  {self.campaign.failed_runs} failed",
         )
         metrics = tk.Frame(page, bg=INK)
         metrics.pack(fill="x", pady=(4, 14))
@@ -445,8 +446,21 @@ class BonnevilleApp(tk.Tk):
             tk.Label(right, text="All campaign records achieved.", bg=INK, fg=LIME, font=(FONT, 13, "bold")).pack(anchor="w")
         self.section(page, "Sponsor demands")
         self._render_sponsor_objectives(page)
+        self.section(page, "Rival standings / official records")
+        standings = [(self.campaign.team.name, self.campaign.official_record_mph)]
+        standings.extend((rival.name, rival.best_speed_mph) for rival in rival_standings(self.campaign))
+        table = tk.Frame(page, bg=INK)
+        table.pack(fill="x")
+        table.columnconfigure(1, weight=1)
+        for position, (name, speed) in enumerate(sorted(standings, key=lambda item: -item[1]), start=1):
+            color = LIME if name == self.campaign.team.name else PAPER
+            status = "Record holder" if world_record and name == world_record[1] else ""
+            for column, text in enumerate((str(position), name, f"{speed:.2f} mph", status)):
+                tk.Label(table, text=text, bg=INK, fg=color, font=(FONT, 10), anchor="w").grid(
+                    row=position, column=column, sticky="w", padx=(0, 18), pady=3,
+                )
         self.section(page, "Latest headlines")
-        for headline in self.campaign.world.headlines[-3:]:
+        for headline in self.campaign.world.headlines:
             tk.Label(page, text=f"-  {headline}", bg=INK, fg=PAPER, font=(FONT, 10), wraplength=1050, justify="left").pack(anchor="w", pady=3)
         if self.campaign.world.reactions:
             tk.Label(page, text=self.campaign.world.reactions[-1], bg=INK, fg=LIME, font=(FONT, 10, "italic"), wraplength=1050, justify="left").pack(anchor="w", pady=(10, 0))
@@ -555,7 +569,7 @@ class BonnevilleApp(tk.Tk):
             messagebox.showerror("Project unavailable", str(exc), parent=self)
         self.show_page("Research")
 
-    def advance_campaign_turn(self, days=365):
+    def advance_campaign_turn(self, days=None):
         if self.campaign.record_attempt is not None:
             messagebox.showerror(
                 "Record attempt in progress",
@@ -563,7 +577,18 @@ class BonnevilleApp(tk.Tk):
                 parent=self,
             )
             return ()
+        previous_record = standing_world_record(self.campaign)
         completed = advance_turn(self.campaign, days=days)
+        record = standing_world_record(self.campaign)
+        if record and record[1] != self.campaign.team.name and (
+            previous_record is None or record[0] > previous_record[0]
+        ):
+            messagebox.showinfo(
+                "Rival world record",
+                f"{record[1]} takes the world record at {record[0]:.2f} mph.\n"
+                f"Your official best: {self.campaign.official_record_mph:.2f} mph.",
+                parent=self,
+            )
         if completed:
             names = ", ".join(TECHNOLOGY_NAME_BY_ID[item] for item in completed)
             messagebox.showinfo("Engineering project complete", f"Research completed: {names}", parent=self)
@@ -582,7 +607,7 @@ class BonnevilleApp(tk.Tk):
             return
         if not messagebox.askyesno(
             "End turn",
-            f"End turn {self.campaign.turn_number}? Sponsor income is paid, engineering projects progress, and the test session closes.",
+            f"End {self.campaign.current_season} {self.campaign.current_year}? Sponsor income is paid, engineering projects progress, rivals make their scheduled attempts, and the test session closes.",
             parent=self,
         ):
             return

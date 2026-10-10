@@ -14,11 +14,12 @@ from campaign_world import (
     WorldState,
     advance_world,
     create_world_state,
+    historical_record_at,
+    synchronize_rivals,
 )
 from historical_records import (
     HISTORICAL_TARGETS,
     average_record_speed,
-    current_world_record,
     next_historical_target,
     record_ids_achieved_by_speed,
     required_record_runs,
@@ -46,6 +47,8 @@ SPONSOR_DEPARTURE_REPUTATION_LOSS = 1.0
 CAMPAIGN_FILE = Path(__file__).with_name("campaign_state.json")
 STARTING_FUNDS_GBP = 100_000.0
 STARTING_YEAR = 1895
+SEASONS = ("Spring", "Summer", "Autumn", "Winter")
+SEASON_START_DAYS = (1, 92, 183, 274)
 DEFAULT_TEAM_NAME = "Bonneville Racing Team"
 ENGINEER_HIRE_COST_GBP = 8_000.0
 MECHANIC_HIRE_COST_GBP = 5_000.0
@@ -261,6 +264,14 @@ class CampaignState:
     world: WorldState = field(default_factory=create_world_state)
 
     @property
+    def current_season(self):
+        return SEASONS[self.season_index]
+
+    @property
+    def season_index(self):
+        return sum(self.current_day_of_year >= day for day in SEASON_START_DAYS) - 1
+
+    @property
     def funds_gbp(self):
         """Compatibility view of the team's available cash."""
         return self.team.cash
@@ -368,8 +379,19 @@ def load_campaign(path=CAMPAIGN_FILE):
             or create_world_state().headlines,
             reactions=world_data.get("reactions", []),
             historical_events_seen=world_data.get("historical_events_seen", []),
+            historical_attempts_seen=world_data.get("historical_attempts_seen", []),
+            record_speed_mph=world_data.get("record_speed_mph", 0.0),
+            record_holder=world_data.get("record_holder", ""),
+            record_year=world_data.get("record_year", 0),
         )
         campaign = CampaignState(**data)
+        synchronize_rivals(campaign.world)
+        if "historical_attempts_seen" not in world_data:
+            headlines = campaign.world.headlines
+            reactions = campaign.world.reactions
+            advance_world(campaign)
+            campaign.world.headlines = headlines
+            campaign.world.reactions = reactions
         # Saves from before sponsor objectives existed need a first demand per sponsor.
         for sponsor_id in campaign.sponsorship.active_sponsors:
             if campaign.sponsorship.objective_for(sponsor_id) is None:
@@ -409,11 +431,20 @@ def complete_run(
     reputation_gain = 2.0 if is_new_record else 1.0
     newly_completed_record_ids = []
     if is_record_attempt:
+        previous_record = standing_world_record(campaign)
         record_speed_mph = (
             measured_mile_speed_mph
             if record_attempt_average_mph is None
             else record_attempt_average_mph
         )
+        campaign.official_record_mph = max(
+            campaign.official_record_mph, record_speed_mph
+        )
+        if previous_record is None or record_speed_mph > previous_record[0]:
+            campaign.world.headlines.append(
+                f"WORLD RECORD: {campaign.team.name} takes the record at {record_speed_mph:.2f} mph."
+            )
+            del campaign.world.headlines[:-8]
         target = next_historical_target(
             campaign.current_year, campaign.completed_historical_record_ids
         )
@@ -429,9 +460,6 @@ def complete_run(
             campaign.completed_historical_record_ids.extend(
                 newly_completed_record_ids
             )
-            campaign.official_record_mph = max(
-                campaign.official_record_mph, round(record_speed_mph, 1)
-            )
             reputation_gain += len(newly_completed_record_ids)
             campaign.world.headlines.append(
                 f"RECORD BEATEN: {campaign.team.name} exceeds the {target.year} "
@@ -446,7 +474,7 @@ def complete_run(
 
 def standing_world_record(campaign):
     """Return (speed_mph, holder, year) for the record as it stands in this campaign."""
-    historical = current_world_record(campaign.current_year)
+    historical = historical_record_at(campaign)
     credited = [
         target.speed_mph
         for target in HISTORICAL_TARGETS
@@ -454,19 +482,24 @@ def standing_world_record(campaign):
     ]
     # Older saves only know which historical marks were beaten, not the exact speed.
     team_speed = max([campaign.official_record_mph, *credited])
-    if team_speed > 0 and (historical is None or team_speed >= historical.speed_mph):
+    rival_speed = campaign.world.record_speed_mph
+    baseline_speed = historical.speed_mph if historical else 0.0
+    if team_speed > 0 and team_speed >= max(rival_speed, baseline_speed):
         return team_speed, campaign.team.name, campaign.current_year
+    if rival_speed > 0 and rival_speed >= baseline_speed:
+        return rival_speed, campaign.world.record_holder, campaign.world.record_year
     if historical is None:
         return None
-    return historical.speed_mph, historical.vehicle, historical.year
+    return historical.speed_mph, f"{historical.driver} Team", historical.year
 
 
 def issue_sponsor_objective(campaign, sponsor_id):
     """Set a sponsor's next demand; speed targets track the standing world record."""
     sponsor = SPONSOR_BY_ID[sponsor_id]
     if sponsor.objective_kind == SPEED_OBJECTIVE:
-        record = current_world_record(campaign.current_year) or HISTORICAL_TARGETS[0]
-        target = round(record.speed_mph * sponsor.objective_value, 1)
+        record = standing_world_record(campaign)
+        speed = record[0] if record else HISTORICAL_TARGETS[0].speed_mph
+        target = round(speed * sponsor.objective_value, 1)
     else:
         target = int(sponsor.objective_value)
     objective = SponsorObjective(
@@ -558,9 +591,15 @@ def complete_failed_run(campaign, run_cost_gbp):
     campaign.failed_runs += 1
 
 
-def advance_turn(campaign, days=365):
-    """Advance campaign time and update the world when a year changes."""
-    previous_year = campaign.current_year
+def advance_turn(campaign, days=None):
+    """Advance one season by default, progressing research and rival attempts."""
+    if days is None:
+        next_season_day = (
+            SEASON_START_DAYS[campaign.season_index + 1]
+            if campaign.season_index < len(SEASONS) - 1
+            else 366
+        )
+        days = next_season_day - campaign.current_day_of_year
     campaign.team.cash = round(
         campaign.team.cash + campaign.sponsorship.income_per_turn_gbp, 2
     )
@@ -584,8 +623,7 @@ def advance_turn(campaign, days=365):
             for project in campaign.engineering_projects
             if project.technology_id not in completed_projects
         ]
-    if campaign.current_year != previous_year:
-        advance_world(campaign)
+    advance_world(campaign)
     _expire_sponsor_objectives(campaign)
     return tuple(completed_projects)
 

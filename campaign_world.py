@@ -1,6 +1,7 @@
 """Deterministic rivals, headlines, historical events, and world reactions."""
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 from historical_records import HISTORICAL_TARGETS
 
@@ -21,6 +22,10 @@ class WorldState:
     headlines: list[str] = field(default_factory=list)
     reactions: list[str] = field(default_factory=list)
     historical_events_seen: list[str] = field(default_factory=list)
+    historical_attempts_seen: list[str] = field(default_factory=list)
+    record_speed_mph: float = 0.0
+    record_holder: str = ""
+    record_year: int = 0
 
 
 @dataclass(frozen=True)
@@ -31,35 +36,15 @@ class HistoricalEvent:
     reaction: str
 
 
-RIVAL_CATALOG = (
+RIVAL_CATALOG = tuple(
     RivalState(
-        "continental_union",
-        "Continental Union Auto Club",
-        "France",
-        "early streamliners",
-        0.91,
-    ),
-    RivalState(
-        "american_speed syndicate".replace(" ", "_"),
-        "American Speed Syndicate",
-        "United States",
-        "high-power specials",
-        0.96,
-    ),
-    RivalState(
-        "british_racing_association",
-        "British Racing Association",
-        "United Kingdom",
-        "aerodynamic refinement",
-        0.94,
-    ),
-    RivalState(
-        "aerospace_research_division",
-        "Aerospace Research Division",
-        "International",
-        "jet and rocket propulsion",
-        0.89,
-    ),
+        driver,
+        f"{driver} Team",
+        next(target.location.rsplit(", ", 1)[-1] for target in HISTORICAL_TARGETS if target.driver == driver),
+        next(target.propulsion for target in HISTORICAL_TARGETS if target.driver == driver),
+        1.0,
+    )
+    for driver in dict.fromkeys(target.driver for target in HISTORICAL_TARGETS)
 )
 
 
@@ -111,9 +96,33 @@ def create_world_state():
     )
 
 
-def _latest_historical_speed(year):
-    available = [target for target in HISTORICAL_TARGETS if target.year <= year]
-    return max((target.speed_mph for target in available), default=0.0)
+def synchronize_rivals(world):
+    """Migrate anonymous rivals and add historical teams missing from older saves."""
+    existing = {rival.rival_id: rival for rival in world.rivals}
+    world.rivals = [
+        existing.get(rival.rival_id, RivalState(**vars(rival)))
+        for rival in RIVAL_CATALOG
+    ]
+
+
+def rival_standings(campaign):
+    """Return teams that have competed, ordered by their best official speed."""
+    return sorted(
+        (rival for rival in campaign.world.rivals if rival.best_speed_mph > 0),
+        key=lambda rival: (-rival.best_speed_mph, rival.name),
+    )
+
+
+def historical_record_at(campaign):
+    """Return the historical baseline reached on the campaign's current date."""
+    campaign_date = date(campaign.current_year, 1, 1) + timedelta(
+        days=campaign.current_day_of_year - 1
+    )
+    return max(
+        (target for target in HISTORICAL_TARGETS if target.date <= campaign_date.isoformat()),
+        key=lambda target: target.speed_mph,
+        default=None,
+    )
 
 
 def _remember(items, message, limit=8):
@@ -126,20 +135,45 @@ def advance_world(campaign):
     world = campaign.world
     world.headlines = []
     world.reactions = []
-    latest_speed = _latest_historical_speed(campaign.current_year)
+    synchronize_rivals(world)
+    rivals = {rival.rival_id: rival for rival in world.rivals}
+    campaign_date = date(campaign.current_year, 1, 1) + timedelta(
+        days=campaign.current_day_of_year - 1
+    )
+    credited_speed = max(
+        (target.speed_mph for target in HISTORICAL_TARGETS
+         if target.record_id in campaign.completed_historical_record_ids),
+        default=0.0,
+    )
+    standing_speed = max(world.record_speed_mph, campaign.official_record_mph, credited_speed)
 
-    for rival in world.rivals:
-        rival_speed = round(latest_speed * rival.performance_multiplier, 1)
-        if rival_speed <= rival.best_speed_mph:
+    for target in sorted(HISTORICAL_TARGETS, key=lambda item: item.date):
+        if target.date > campaign_date.isoformat() or target.record_id in world.historical_attempts_seen:
             continue
-        rival.best_speed_mph = rival_speed
+        world.historical_attempts_seen.append(target.record_id)
+        rival = rivals[target.driver]
+        rival.best_speed_mph = max(rival.best_speed_mph, target.speed_mph)
+        if target.speed_mph > standing_speed:
+            standing_speed = target.speed_mph
+            world.record_speed_mph = target.speed_mph
+            world.record_holder = rival.name
+            world.record_year = target.year
+            message = (
+                f"WORLD RECORD: {rival.name} takes the record at {target.speed_mph:.2f} mph "
+                f"in {target.vehicle} ({target.year})."
+            )
+        else:
+            message = (
+                f"{rival.name} runs {target.speed_mph:.2f} mph in {target.vehicle} "
+                f"({target.year}); the standing record survives."
+            )
         _remember(
             world.headlines,
-            f"{rival.name} reports a {rival_speed:.1f} mph benchmark.",
+            message,
         )
 
     for event in HISTORICAL_EVENTS:
-        if event.year != campaign.current_year or event.event_id in world.historical_events_seen:
+        if event.year > campaign.current_year or event.event_id in world.historical_events_seen:
             continue
         world.historical_events_seen.append(event.event_id)
         _remember(world.headlines, f"HISTORICAL EVENT: {event.headline}")
