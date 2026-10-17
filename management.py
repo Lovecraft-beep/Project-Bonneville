@@ -446,7 +446,9 @@ def complete_run(
             )
             del campaign.world.headlines[:-8]
         target = next_historical_target(
-            campaign.current_year, campaign.completed_historical_record_ids
+            campaign.current_year,
+            campaign.completed_historical_record_ids,
+            campaign.current_day_of_year,
         )
         if target and target_completed(target, record_speed_mph):
             completed_ids = set(campaign.completed_historical_record_ids)

@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import replace
+from math import isfinite
 import tkinter as tk
 from tkinter import messagebox
 
@@ -15,12 +16,12 @@ from diagnostics import (
     suggest_gear_ratio_adjustment,
     clear_diagnostic_log,
 )
-from engines import AVAILABLE_ENGINES, ENGINE_TUNE_STAGES, available_engines
 from engines import (
     AVAILABLE_ENGINES,
     ENGINE_TUNE_STAGES,
     available_engines,
     next_engine_tune_stage,
+    tune_engine,
 )
 from gearbox import (
     DIRECT_DRIVE,
@@ -232,7 +233,9 @@ class BonnevilleApp(tk.Tk):
 
     def _refresh_header(self):
         target = next_historical_target(
-            self.campaign.current_year, self.campaign.completed_historical_record_ids
+            self.campaign.current_year,
+            self.campaign.completed_historical_record_ids,
+            self.campaign.current_day_of_year,
         )
         gap = record_gap_headline(target, self.campaign.best_measured_mile_speed_mph)
         self.header_status.configure(
@@ -375,7 +378,9 @@ class BonnevilleApp(tk.Tk):
     def render_dashboard(self):
         page = self.scroll_area()
         target = next_historical_target(
-            self.campaign.current_year, self.campaign.completed_historical_record_ids
+            self.campaign.current_year,
+            self.campaign.completed_historical_record_ids,
+            self.campaign.current_day_of_year,
         )
         self.page_title(
             page,
@@ -653,6 +658,15 @@ class BonnevilleApp(tk.Tk):
         columns.pack(fill="x")
         for label, value in (("Mass", f"{vehicle.mass:,.0f} kg"), ("Drag coefficient", f"{vehicle.cd:.3f}"), ("Frontal area", f"{vehicle.area:.2f} m2"), ("Tyre grip", f"{vehicle.tyre_grip_factor:.2f}")):
             self.card(columns, label, value).pack(side="left", fill="both", expand=True, padx=(0, 8))
+        self.section(page, "Fitted aerodynamics")
+        tk.Label(
+            page,
+            text=self._aerodynamics_summary(entry.aerodynamics_technology),
+            bg=INK,
+            fg=MUTED,
+            font=(FONT, 10),
+            justify="left",
+        ).pack(anchor="w", pady=(0, 12))
         if self.campaign.record_attempt is not None:
             self.section(page, "Official attempt service only")
             tk.Label(page, text="Engine, chassis, and aerodynamic changes are locked until the attempt is complete.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w", pady=(0, 10))
@@ -719,13 +733,23 @@ class BonnevilleApp(tk.Tk):
     def apply_component(self, entry, component, choice, window):
         if component == "engine":
             entry.engine_name = choice.name
-            entry.engine_tune_stage = 0
+            entry.engine_tune_stage = self._inherited_engine_tune_stage(choice.name)
             default_box = recommended_transmission(choice)
-            entry.gearbox_name = default_box.name
-            entry.gearbox_ratios = tuple(default_box.gears)
-            entry.gearbox_final_drive = default_box.final_drive_ratio
+            if default_box.name == entry.gearbox_name:
+                gearbox = deepcopy(default_box)
+                if entry.gearbox_ratios:
+                    gearbox.gears = tuple(entry.gearbox_ratios)
+                if entry.gearbox_final_drive is not None:
+                    gearbox.final_drive = entry.gearbox_final_drive
+            else:
+                gearbox, _ = self._gearbox_with_saved_ratios(
+                    default_box, exclude_entry=entry
+                )
+            entry.gearbox_name = gearbox.name
+            entry.gearbox_ratios = tuple(gearbox.gears)
+            entry.gearbox_final_drive = gearbox.final_drive_ratio
         elif component == "gearbox":
-            gearbox = deepcopy(choice)
+            gearbox, _ = self._gearbox_with_saved_ratios(choice)
             entry.gearbox_name = gearbox.name
             entry.gearbox_ratios = tuple(gearbox.gears)
             entry.gearbox_final_drive = gearbox.final_drive_ratio
@@ -761,7 +785,7 @@ class BonnevilleApp(tk.Tk):
             child.destroy()
         page = self.scroll_area()
         vehicle = build_vehicle_from_garage_entry(entry)
-        self.page_title(page, "Workshop controls", "Gearbox ratios", f"{vehicle.name}  /  Adjust in 0.1 steps. Final drive range: 0.5-6.0; gear range: 0.5-5.0.")
+        self.page_title(page, "Workshop controls", "Gearbox ratios", f"{vehicle.name}  /  Use 0.05 steps or enter up to 3 decimal places. Final drive range: 0.5-6.0; gear range: 0.5-5.0.")
         self._ratio_control(page, entry, None, vehicle.gearbox.final_drive_ratio)
         for index, ratio in enumerate(vehicle.gearbox.gears):
             self._ratio_control(page, entry, index, ratio)
@@ -772,9 +796,78 @@ class BonnevilleApp(tk.Tk):
         row = tk.Frame(parent, bg=PANEL, padx=14, pady=10)
         row.pack(fill="x", pady=3)
         tk.Label(row, text=label, bg=PANEL, fg=PAPER, font=(FONT, 10, "bold")).pack(side="left")
-        tk.Label(row, text=f"{value:.3f}", bg=PANEL, fg=LIME, font=(FONT, 11, "bold")).pack(side="right", padx=12)
-        tk.Button(row, text="+0.1", command=lambda: self.adjust_gearbox_ratio(entry, gear_index, 0.1), bg=PANEL_LIGHT, fg=PAPER, relief="flat", padx=10, pady=5).pack(side="right", padx=3)
-        tk.Button(row, text="-0.1", command=lambda: self.adjust_gearbox_ratio(entry, gear_index, -0.1), bg=PANEL_LIGHT, fg=PAPER, relief="flat", padx=10, pady=5).pack(side="right", padx=3)
+        ratio_input = tk.Entry(
+            row,
+            width=8,
+            justify="right",
+            bg=PANEL_LIGHT,
+            fg=LIME,
+            insertbackground=PAPER,
+            relief="flat",
+            font=(FONT, 11, "bold"),
+        )
+        ratio_input.insert(0, f"{value:.3f}")
+        ratio_input.pack(side="right", padx=8, ipady=4)
+        ratio_input.bind(
+            "<Return>",
+            lambda _event: self.set_gearbox_ratio(
+                entry, gear_index, ratio_input.get()
+            ),
+        )
+        tk.Button(
+            row,
+            text="SET",
+            command=lambda: self.set_gearbox_ratio(
+                entry, gear_index, ratio_input.get()
+            ),
+            bg=PANEL_LIGHT,
+            fg=PAPER,
+            relief="flat",
+            padx=10,
+            pady=5,
+        ).pack(side="right", padx=3)
+        tk.Button(row, text="+0.05", command=lambda: self.adjust_gearbox_ratio(entry, gear_index, 0.05), bg=PANEL_LIGHT, fg=PAPER, relief="flat", padx=8, pady=5).pack(side="right", padx=3)
+        tk.Button(row, text="-0.05", command=lambda: self.adjust_gearbox_ratio(entry, gear_index, -0.05), bg=PANEL_LIGHT, fg=PAPER, relief="flat", padx=8, pady=5).pack(side="right", padx=3)
+
+    def _parse_gear_ratio_input(self, value, gear_index):
+        try:
+            ratio = float(value)
+        except (TypeError, ValueError):
+            messagebox.showerror("Invalid gear ratio", "Enter a numeric ratio.", parent=self)
+            return None
+        if not isfinite(ratio) or not abs(ratio - round(ratio, 3)) < 1e-9:
+            messagebox.showerror(
+                "Invalid gear ratio",
+                "Enter a finite ratio with no more than 3 decimal places.",
+                parent=self,
+            )
+            return None
+        minimum, maximum = (0.5, 6.0) if gear_index is None else (0.5, 5.0)
+        if not minimum <= ratio <= maximum:
+            messagebox.showerror(
+                "Invalid gear ratio",
+                f"Ratio must be between {minimum:.1f} and {maximum:.1f}.",
+                parent=self,
+            )
+            return None
+        return round(ratio, 3)
+
+    def set_gearbox_ratio(self, entry, gear_index, value):
+        ratio = self._parse_gear_ratio_input(value, gear_index)
+        if ratio is None:
+            return
+        vehicle = build_vehicle_from_garage_entry(entry)
+        current = (
+            vehicle.gearbox.final_drive_ratio
+            if gear_index is None
+            else vehicle.gearbox.gears[gear_index]
+        )
+        if not adjust_gearbox_ratio(vehicle.gearbox, gear_index, ratio - current):
+            return
+        entry.gearbox_final_drive = vehicle.gearbox.final_drive_ratio
+        entry.gearbox_ratios = tuple(vehicle.gearbox.gears)
+        save_campaign(self.campaign)
+        self.tune_vehicle_gearbox(entry)
 
     def adjust_gearbox_ratio(self, entry, gear_index, delta):
         vehicle = build_vehicle_from_garage_entry(entry)
@@ -796,6 +889,54 @@ class BonnevilleApp(tk.Tk):
         self.builder = {"step": "chassis"}
         self.render_builder()
 
+    def _inherited_engine_tune_stage(self, engine_name):
+        entries = self.campaign.garage.vehicles + self.campaign.garage.museum
+        return max(
+            (
+                entry.engine_tune_stage
+                for entry in entries
+                if entry.engine_name == engine_name
+            ),
+            default=0,
+        )
+
+    def _gearbox_with_saved_ratios(self, gearbox, exclude_entry=None):
+        entries = (
+            *reversed(self.campaign.garage.vehicles),
+            *reversed(self.campaign.garage.museum),
+        )
+        donor = next(
+            (
+                entry
+                for entry in entries
+                if entry is not exclude_entry and entry.gearbox_name == gearbox.name
+            ),
+            None,
+        )
+        configured = deepcopy(gearbox)
+        if donor is None:
+            return configured, False
+        if donor.gearbox_ratios and len(donor.gearbox_ratios) == configured.gear_count:
+            configured.gears = tuple(donor.gearbox_ratios)
+        if donor.gearbox_final_drive is not None:
+            configured.final_drive = donor.gearbox_final_drive
+        return configured, True
+
+    def _aerodynamics_summary(self, technology_ids=None):
+        if technology_ids is None:
+            technology_ids = self.campaign.research.aerodynamics_technology
+        technology_ids = tuple(technology_ids)
+        installed = (
+            "\n".join(
+                f"- {TECHNOLOGY_NAME_BY_ID[technology_id]}"
+                for technology_id in technology_ids
+            )
+            if technology_ids
+            else "None researched"
+        )
+        drag_reduction = aerodynamics_effects(technology_ids)["drag_reduction"]
+        return f"{installed}\nCumulative drag reduction: {drag_reduction:.0%}"
+
     def render_builder(self):
         self.page = "Garage"
         self._refresh_header()
@@ -812,16 +953,48 @@ class BonnevilleApp(tk.Tk):
                 self.action_button(page, f"{item.name}  /  {item.mass_kg:,.0f} kg  /  GBP {item.cost_gbp:,.0f}\n{item.description}", lambda value=item: self.builder_select("chassis", value))
         elif step == "engine":
             for item in available_engines(self.campaign.research.engine_technology):
-                self.action_button(page, f"{item.name}  /  {item.power_hp:,.0f} hp  /  GBP {item.purchase_cost_gbp:,.0f}  /  Reliability {item.reliability:.0%}", lambda value=item: self.builder_select("engine", value))
+                inherited_stage = self._inherited_engine_tune_stage(item.name)
+                stage_label = f"  /  Tune stage {inherited_stage} carried over" if inherited_stage else ""
+                self.action_button(page, f"{item.name}  /  {item.power_hp:,.0f} hp  /  GBP {item.purchase_cost_gbp:,.0f}  /  Reliability {item.reliability:.0%}{stage_label}", lambda value=item: self.builder_select("engine", value))
         elif step == "gearbox":
             engine = self.builder["engine"]
             choices = (DIRECT_DRIVE,) if engine.torque_curve_type in ("turbojet", "rocket") else TRANSMISSION_CATALOG
             for item in choices:
-                self.action_button(page, f"{item.name}  /  {item.gear_count} gears  /  {item.efficiency:.0%} efficiency  /  GBP {item.cost_gbp:,.0f}", lambda value=item: self.builder_select("gearbox", value))
+                inherited, has_saved_ratios = self._gearbox_with_saved_ratios(item)
+                ratio_label = (
+                    f"  /  Saved ratios carried over: {' / '.join(f'{ratio:.2f}' for ratio in inherited.gears)}; final {inherited.final_drive_ratio:.2f}"
+                    if has_saved_ratios
+                    else ""
+                )
+                self.action_button(page, f"{item.name}  /  {item.gear_count} gears  /  {item.efficiency:.0%} efficiency  /  GBP {item.cost_gbp:,.0f}{ratio_label}", lambda value=item: self.builder_select("gearbox", value))
         elif step == "brakes":
             for item in available_brakes(self.campaign.current_year):
                 self.action_button(page, f"{item.name}  /  {item.max_braking_g:.2f} g  /  GBP {item.cost_gbp:,.0f}", lambda value=item: self.builder_select("brakes", value))
         else:
+            self.section(page, "Pre-fitted aerodynamics")
+            tk.Label(
+                page,
+                text=self._aerodynamics_summary(),
+                bg=INK,
+                fg=MUTED,
+                font=(FONT, 10),
+                justify="left",
+            ).pack(anchor="w", pady=(0, 12))
+            engine_stage = self.builder.get("engine_tune_stage", 0)
+            gearbox = self.builder["gearbox"]
+            self.section(page, "Inherited setup")
+            tk.Label(
+                page,
+                text=(
+                    f"Engine tune: {'Stock' if engine_stage == 0 else f'Stage {engine_stage}'}\n"
+                    f"{gearbox.name} ratios: {' / '.join(f'{ratio:.2f}' for ratio in gearbox.gears)}\n"
+                    f"Final drive: {gearbox.final_drive_ratio:.2f}"
+                ),
+                bg=INK,
+                fg=MUTED,
+                font=(FONT, 10),
+                justify="left",
+            ).pack(anchor="w", pady=(0, 12))
             default_name = self.builder.setdefault(
                 "vehicle_name", next_vehicle_name(self.campaign)
             )
@@ -841,7 +1014,17 @@ class BonnevilleApp(tk.Tk):
         if key == "name":
             self.confirm_vehicle_name(value)
             return
-        self.builder[key] = value
+        if key == "engine":
+            self.builder[key] = value
+            self.builder["engine_tune_stage"] = self._inherited_engine_tune_stage(
+                value.name
+            )
+        elif key == "gearbox":
+            self.builder[key], self.builder["gearbox_inherited"] = (
+                self._gearbox_with_saved_ratios(value)
+            )
+        else:
+            self.builder[key] = value
         order = ("chassis", "engine", "gearbox", "brakes", "name")
         current_index = order.index(key)
         if current_index < len(order) - 1:
@@ -870,7 +1053,9 @@ class BonnevilleApp(tk.Tk):
 
     def finish_vehicle_build(self, name):
         chassis = self.builder["chassis"]
-        engine = self.builder["engine"]
+        stock_engine = self.builder["engine"]
+        engine_tune_stage = self.builder.get("engine_tune_stage", 0)
+        engine = tune_engine(stock_engine, engine_tune_stage)
         gearbox = deepcopy(self.builder["gearbox"])
         brakes = replace(self.builder["brakes"])
         aero = tuple(self.campaign.research.aerodynamics_technology)
@@ -889,7 +1074,7 @@ class BonnevilleApp(tk.Tk):
         )
         vehicle.chassis_id = chassis.chassis_id
         vehicle.aerodynamics_technology = aero
-        cost = round(chassis.cost_gbp + engine.purchase_cost_gbp + gearbox.cost_gbp + brakes.cost_gbp)
+        cost = round(chassis.cost_gbp + stock_engine.purchase_cost_gbp + gearbox.cost_gbp + brakes.cost_gbp)
         from management import GarageVehicle
 
         entry = GarageVehicle(
@@ -901,8 +1086,23 @@ class BonnevilleApp(tk.Tk):
             aerodynamics_technology=aero,
             gearbox_ratios=tuple(gearbox.gears),
             gearbox_final_drive=gearbox.final_drive_ratio,
+            engine_tune_stage=engine_tune_stage,
         )
-        if not messagebox.askyesno("Confirm construction", f"Build {name} for GBP {cost:,.0f}?\nAvailable funds: GBP {self.campaign.team.cash:,.0f}", parent=self):
+        aero_summary = self._aerodynamics_summary(aero)
+        engine_tune_summary = (
+            "Stock" if engine_tune_stage == 0 else f"Stage {engine_tune_stage}"
+        )
+        ratio_summary = " / ".join(f"{ratio:.2f}" for ratio in gearbox.gears)
+        if not messagebox.askyesno(
+            "Confirm construction",
+            f"Build {name} for GBP {cost:,.0f}?\n\n"
+            f"Engine tune: {engine_tune_summary}\n"
+            f"{gearbox.name} ratios: {ratio_summary}\n"
+            f"Final drive: {gearbox.final_drive_ratio:.2f}\n\n"
+            f"Pre-fitted aerodynamics:\n{aero_summary}\n\n"
+            f"Available funds: GBP {self.campaign.team.cash:,.0f}",
+            parent=self,
+        ):
             self.show_page("Garage")
             return
         try:
@@ -970,7 +1170,11 @@ class BonnevilleApp(tk.Tk):
             self.section(page, "Garage vehicles")
             for entry in self.campaign.garage.vehicles:
                 self.action_button(page, f"{entry.vehicle_name}  /  {entry.engine_name}  /  {entry.gearbox_name}", lambda selected=entry: self.choose_track_for_vehicle(selected))
-        target = next_historical_target(self.campaign.current_year, self.campaign.completed_historical_record_ids)
+        target = next_historical_target(
+            self.campaign.current_year,
+            self.campaign.completed_historical_record_ids,
+            self.campaign.current_day_of_year,
+        )
         if target:
             self.section(page, "Historical record attempt")
             if session_runs_remaining(self.campaign, record=True) >= required_record_runs(self.campaign.current_year):
@@ -1036,7 +1240,11 @@ class BonnevilleApp(tk.Tk):
         if self.campaign.record_attempt is not None:
             self.resume_record_attempt()
             return
-        target = next_historical_target(self.campaign.current_year, self.campaign.completed_historical_record_ids)
+        target = next_historical_target(
+            self.campaign.current_year,
+            self.campaign.completed_historical_record_ids,
+            self.campaign.current_day_of_year,
+        )
         if not target:
             messagebox.showinfo("Campaign records", "All historical campaign goals have been completed.", parent=self)
             return
@@ -1159,6 +1367,7 @@ class BonnevilleApp(tk.Tk):
                 record_target = next_historical_target(
                     self.campaign.current_year,
                     self.campaign.completed_historical_record_ids,
+                    self.campaign.current_day_of_year,
                 )
             if record_target is None:
                 messagebox.showinfo(
@@ -1181,6 +1390,7 @@ class BonnevilleApp(tk.Tk):
             record_target = next_historical_target(
                 self.campaign.current_year,
                 self.campaign.completed_historical_record_ids,
+                self.campaign.current_day_of_year,
             )
         if session_runs_remaining(self.campaign, record=record_attempt) <= 0:
             messagebox.showerror(
@@ -1355,6 +1565,7 @@ class BonnevilleApp(tk.Tk):
             chase_target = next_historical_target(
                 self.campaign.current_year,
                 self.campaign.completed_historical_record_ids,
+                self.campaign.current_day_of_year,
             )
             if chase_target is not None:
                 gap = chase_target.speed_mph - self.last_result.measured_mile_speed_mph
@@ -1500,11 +1711,19 @@ class BonnevilleApp(tk.Tk):
             self.action_button(page, "PREPARE NEXT TEST", lambda: self.show_page("Test Runs"))
             if self.last_run_was_record_attempt:
                 self._offer_another_record_attempt(page)
-            elif report.completed and self.campaign.garage.vehicles and next_historical_target(self.campaign.current_year, self.campaign.completed_historical_record_ids):
+            elif report.completed and self.campaign.garage.vehicles and next_historical_target(
+                self.campaign.current_year,
+                self.campaign.completed_historical_record_ids,
+                self.campaign.current_day_of_year,
+            ):
                 self.action_button(page, "PLAN RECORD ATTEMPT", self.start_record_attempt)
 
     def _offer_another_record_attempt(self, page):
-        if next_historical_target(self.campaign.current_year, self.campaign.completed_historical_record_ids) is None:
+        if next_historical_target(
+            self.campaign.current_year,
+            self.campaign.completed_historical_record_ids,
+            self.campaign.current_day_of_year,
+        ) is None:
             return
         remaining = session_runs_remaining(self.campaign, record=True)
         if remaining >= required_record_runs(self.campaign.current_year):
@@ -1628,11 +1847,40 @@ class BonnevilleApp(tk.Tk):
         row = tk.Frame(parent, bg=PANEL, padx=14, pady=10)
         row.pack(fill="x", pady=3)
         tk.Label(row, text=label, bg=PANEL, fg=PAPER, font=(FONT, 10, "bold")).pack(side="left")
-        tk.Label(row, text=f"{value:.3f}", bg=PANEL, fg=LIME, font=(FONT, 11, "bold")).pack(side="right", padx=12)
-        for delta in (-0.1, 0.1):
+        ratio_input = tk.Entry(
+            row,
+            width=8,
+            justify="right",
+            bg=PANEL_LIGHT,
+            fg=LIME,
+            insertbackground=PAPER,
+            relief="flat",
+            font=(FONT, 11, "bold"),
+        )
+        ratio_input.insert(0, f"{value:.3f}")
+        ratio_input.pack(side="right", padx=8, ipady=4)
+        ratio_input.bind(
+            "<Return>",
+            lambda _event: self.set_trackside_ratio(
+                entry, gear_index, ratio_input.get()
+            ),
+        )
+        tk.Button(
+            row,
+            text="SET",
+            command=lambda: self.set_trackside_ratio(
+                entry, gear_index, ratio_input.get()
+            ),
+            bg=PANEL_LIGHT,
+            fg=PAPER,
+            relief="flat",
+            padx=10,
+            pady=5,
+        ).pack(side="right", padx=3)
+        for delta in (-0.05, 0.05):
             tk.Button(
                 row,
-                text=f"{delta:+.1f}",
+                text=f"{delta:+.2f}",
                 command=lambda change=delta: self.adjust_trackside_ratio(entry, gear_index, change),
                 bg=PANEL_LIGHT,
                 fg=PAPER,
@@ -1640,6 +1888,31 @@ class BonnevilleApp(tk.Tk):
                 padx=10,
                 pady=5,
             ).pack(side="right", padx=3)
+
+    def set_trackside_ratio(self, entry, gear_index, value):
+        ratio = self._parse_gear_ratio_input(value, gear_index)
+        if ratio is None:
+            return
+        vehicle = build_vehicle_from_garage_entry(entry)
+        gears = list(vehicle.gearbox.gears)
+        final_drive = vehicle.gearbox.final_drive_ratio
+        if gear_index is None:
+            final_drive = ratio
+        else:
+            gears[gear_index] = ratio
+        try:
+            apply_gear_ratios_trackside(
+                self.campaign, entry, tuple(gears), final_drive
+            )
+        except ValueError as exc:
+            messagebox.showerror(
+                "Trackside adjustment unavailable", str(exc), parent=self
+            )
+            return
+        self.last_trackside_ratio_adjusted = True
+        self.last_vehicle = build_vehicle_from_garage_entry(entry)
+        save_campaign(self.campaign)
+        self.show_page("Trackside Modifications")
 
     def adjust_trackside_ratio(self, entry, gear_index, delta):
         try:

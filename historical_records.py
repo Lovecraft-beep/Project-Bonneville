@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 
 
@@ -37,15 +38,36 @@ def load_historical_targets(path=RECORDS_FILE):
 HISTORICAL_TARGETS = load_historical_targets()
 
 
-def next_historical_target(current_year, completed_record_ids):
-    """Return the next sequential record from the historical progression.
+def next_historical_target(current_year, completed_record_ids, current_day_of_year=None):
+    """Return the standing record, or the next faster uncompleted record.
 
-    ``current_year`` is retained for compatibility with saved campaign logic;
-    a campaign goal is visible even when its historical year is still ahead.
+    When a campaign day is supplied, only records reached by that date count as
+    the standing mark. The next goal remains visible even if it is still ahead.
     """
     completed = set(completed_record_ids)
+    if current_day_of_year is None:
+        standing = current_world_record(current_year)
+    else:
+        campaign_date = date(current_year, 1, 1) + timedelta(
+            days=current_day_of_year - 1
+        )
+        standing = max(
+            (
+                target
+                for target in HISTORICAL_TARGETS
+                if target.date <= campaign_date.isoformat()
+            ),
+            key=lambda target: target.speed_mph,
+            default=None,
+        )
+    if standing and standing.record_id not in completed:
+        return standing
+
     for target in HISTORICAL_TARGETS:
-        if target.record_id not in completed:
+        if (
+            target.record_id not in completed
+            and (standing is None or target.speed_mph > standing.speed_mph)
+        ):
             return target
     return None
 

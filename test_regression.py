@@ -174,6 +174,37 @@ class TestSessionTests(unittest.TestCase):
 
 
 class RecordChaseTests(unittest.TestCase):
+    def test_first_upgraded_car_can_reach_the_1899_standing_record(self):
+        from historical_records import current_world_record
+        from simulation import run_simulation
+        from tracks import PUBLIC_ROADS
+        from vehicle_designer import build_vehicle_from_garage_entry
+
+        entry = GarageVehicle(
+            "Record Chaser",
+            "carriage_frame",
+            WELCH_HEMI.name,
+            "2-Speed Transmission",
+            "Wooden block brakes",
+            ("wind_deflector", "wheel_fairings_/_spats", "basic_streamlining"),
+            (3.0, 2.5),
+            1.5,
+            3,
+        )
+        vehicle = build_vehicle_from_garage_entry(entry)
+        result = run_simulation(
+            vehicle,
+            PUBLIC_ROADS.length_miles,
+            PUBLIC_ROADS.measured_mile_start,
+            track_friction_factor=PUBLIC_ROADS.friction_factor,
+            air_density_kg_m3=PUBLIC_ROADS.air_density_kg_m3,
+        )
+
+        self.assertGreaterEqual(
+            result.measured_mile_speed_mph,
+            current_world_record(1899).speed_mph,
+        )
+
     def test_world_record_is_latest_standing_record_for_year(self):
         from historical_records import current_world_record
 
@@ -217,6 +248,97 @@ class RecordChaseTests(unittest.TestCase):
 
 
 class VehicleNamingTests(unittest.TestCase):
+    def test_new_design_inherits_engine_tune_and_matching_gearbox_ratios(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        donor = GarageVehicle(
+            "Existing Build",
+            "improvised_chassis",
+            PIONEER_SINGLE_CYLINDER.name,
+            TRANSMISSION_CATALOG[1].name,
+            "Wooden block brakes",
+            gearbox_ratios=(3.6, 2.2),
+            gearbox_final_drive=1.8,
+            engine_tune_stage=2,
+        )
+        campaign.garage.vehicles.append(donor)
+        app = SimpleNamespace(
+            campaign=campaign,
+            builder={},
+            render_builder=Mock(),
+            show_page=Mock(),
+        )
+        app._inherited_engine_tune_stage = lambda engine_name: (
+            BonnevilleApp._inherited_engine_tune_stage(app, engine_name)
+        )
+        app._gearbox_with_saved_ratios = lambda gearbox, exclude_entry=None: (
+            BonnevilleApp._gearbox_with_saved_ratios(app, gearbox, exclude_entry)
+        )
+        app._aerodynamics_summary = lambda technology_ids=None: "None researched\nCumulative drag reduction: 0%"
+
+        BonnevilleApp.builder_select(app, "engine", PIONEER_SINGLE_CYLINDER)
+        BonnevilleApp.builder_select(app, "gearbox", TRANSMISSION_CATALOG[1])
+        self.assertEqual(app.builder["engine_tune_stage"], 2)
+        self.assertEqual(app.builder["gearbox"].gears, (3.6, 2.2))
+        self.assertEqual(app.builder["gearbox"].final_drive_ratio, 1.8)
+
+        app.builder.update(
+            {
+                "chassis": CHASSIS_BY_ID["improvised_chassis"],
+                "brakes": BRAKE_BY_NAME["Wooden block brakes"],
+            }
+        )
+        with (
+            patch("ui.app.messagebox.askyesno", return_value=True) as confirm,
+            patch("ui.app.build_vehicle") as build,
+            patch("ui.app.save_campaign"),
+        ):
+            BonnevilleApp.finish_vehicle_build(app, "Inherited Build")
+
+        confirmation_text = confirm.call_args.args[1]
+        self.assertIn("Engine tune: Stage 2", confirmation_text)
+        self.assertIn("2-Speed Transmission ratios: 3.60 / 2.20", confirmation_text)
+        self.assertIn("Final drive: 1.80", confirmation_text)
+        entry = build.call_args.args[1]
+        vehicle = build.call_args.kwargs["vehicle"]
+        self.assertEqual(entry.engine_tune_stage, 2)
+        self.assertEqual(entry.gearbox_ratios, (3.6, 2.2))
+        self.assertEqual(entry.gearbox_final_drive, 1.8)
+        self.assertEqual(vehicle.engine.power_hp, tune_engine(PIONEER_SINGLE_CYLINDER, 2).power_hp)
+
+    def test_new_vehicle_confirmation_lists_prefitted_aerodynamics(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        campaign.research.aerodynamics_technology = [
+            "wind_deflector",
+            "wheel_fairings_/_spats",
+            "basic_streamlining",
+        ]
+        app = SimpleNamespace(
+            campaign=campaign,
+            builder={
+                "chassis": CHASSIS_BY_ID["improvised_chassis"],
+                "engine": PIONEER_SINGLE_CYLINDER,
+                "gearbox": TRANSMISSION_CATALOG[1],
+                "brakes": BRAKE_BY_NAME["Wooden block brakes"],
+            },
+            show_page=Mock(),
+        )
+        app._aerodynamics_summary = lambda technology_ids=None: (
+            BonnevilleApp._aerodynamics_summary(app, technology_ids)
+        )
+
+        with patch("ui.app.messagebox.askyesno", return_value=False) as confirm:
+            BonnevilleApp.finish_vehicle_build(app, "Aero Test")
+
+        confirmation_text = confirm.call_args.args[1]
+        self.assertIn("Wind Deflector", confirmation_text)
+        self.assertIn("Wheel Fairings / Spats", confirmation_text)
+        self.assertIn("Basic Streamlining", confirmation_text)
+        self.assertIn("Cumulative drag reduction: 7%", confirmation_text)
+
     def test_name_defaults_follow_first_vehicle_and_skip_existing_names(self):
         campaign = CampaignState()
         self.assertEqual(next_vehicle_name(campaign), "Bonneville Special 01")
@@ -283,6 +405,9 @@ class EngineTuningTests(unittest.TestCase):
             card=Mock(return_value=Mock()),
             section=Mock(),
             action_button=Mock(),
+        )
+        app._aerodynamics_summary = lambda technology_ids=None: (
+            BonnevilleApp._aerodynamics_summary(app, technology_ids)
         )
         scroll_area = Mock()
         container = Mock()
@@ -634,8 +759,10 @@ class RecordAttemptTests(unittest.TestCase):
     def test_1924_attempt_requires_return_and_credits_only_the_average(self):
         from ui.app import BonnevilleApp
 
-        target = HISTORICAL_TARGETS[0]
         campaign = CampaignState(current_year=1924)
+        target = next_historical_target(
+            1924, [], campaign.current_day_of_year
+        )
         entry = GarageVehicle(
             "Record Test",
             CHASSIS_TECHNOLOGY_TREE[0].technology_id,
@@ -959,6 +1086,41 @@ class TracksideServiceTests(unittest.TestCase):
         self.assertEqual(rebuilt.gearbox.final_drive_ratio, 1.25)
         self.assertEqual(campaign.team.cash, starting_cash - 5.0)
 
+    def test_manual_ratio_fields_accept_and_persist_mechanic_precision(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        entry = self._garage_entry()
+        campaign.garage.vehicles.append(entry)
+        app = BonnevilleApp.__new__(BonnevilleApp)
+        app.campaign = campaign
+        app.tune_vehicle_gearbox = Mock()
+
+        with patch("ui.app.save_campaign"):
+            app.set_gearbox_ratio(entry, 0, "3.05")
+
+        self.assertEqual(entry.gearbox_ratios[0], 3.05)
+
+        starting_cash = campaign.team.cash
+        app.last_trackside_ratio_adjusted = False
+        app.last_vehicle = None
+        app.show_page = Mock()
+        with patch("ui.app.save_campaign"):
+            app.set_trackside_ratio(entry, None, "1.25")
+
+        self.assertEqual(entry.gearbox_final_drive, 1.25)
+        self.assertEqual(campaign.team.cash, starting_cash - 5.0)
+        self.assertTrue(app.last_trackside_ratio_adjusted)
+
+    def test_manual_ratio_input_rejects_out_of_range_values(self):
+        from ui.app import BonnevilleApp
+
+        app = BonnevilleApp.__new__(BonnevilleApp)
+        with patch("ui.app.messagebox.showerror") as show_error:
+            self.assertIsNone(app._parse_gear_ratio_input("6.01", None))
+            self.assertIsNone(app._parse_gear_ratio_input("1.2345", 0))
+        self.assertEqual(show_error.call_count, 2)
+
     def test_trackside_screen_offers_ratio_steps_and_another_test(self):
         from ui.app import BonnevilleApp
 
@@ -992,6 +1154,7 @@ class TracksideServiceTests(unittest.TestCase):
         with (
             patch("ui.app.tk.Frame"),
             patch("ui.app.tk.Label"),
+            patch("ui.app.tk.Entry"),
             patch("ui.app.tk.Button") as button,
         ):
             BonnevilleApp.render_trackside_modifications(app)
@@ -1000,7 +1163,7 @@ class TracksideServiceTests(unittest.TestCase):
         self.assertTrue(any("RUN ANOTHER TEST HERE" in label for label in action_labels))
         self.assertTrue(any("APPLY SUGGESTION" in label for label in action_labels))
         ratio_steps = {call.kwargs["text"] for call in button.call_args_list}
-        self.assertTrue({"-0.1", "+0.1"}.issubset(ratio_steps))
+        self.assertTrue({"-0.05", "+0.05"}.issubset(ratio_steps))
 
 
 class EngineAvailabilityTests(unittest.TestCase):
@@ -1322,6 +1485,14 @@ class HistoricalChallengeRegressionTests(unittest.TestCase):
         next_target = next_historical_target(1898, [first_target.record_id])
         self.assertEqual(next_target.record_id, "jenatzy_dogcart_1899")
 
+    def test_campaign_target_matches_current_standing_historical_record(self):
+        target = next_historical_target(
+            1899,
+            ["jeantaud_1898", "jenatzy_dogcart_1899", "jeantaud_profilee_1899"],
+            183,
+        )
+        self.assertEqual(target.record_id, "jamais_contente_1899")
+
     def test_campaign_run_completes_current_historical_target(self):
         campaign = CampaignState(current_year=1898)
         complete_run(
@@ -1370,7 +1541,7 @@ class HistoricalChallengeRegressionTests(unittest.TestCase):
             [brake.name for brake in available_brakes(1895)],
             ["Wooden block brakes"],
         )
-        self.assertEqual(PIONEER_SINGLE_CYLINDER.power_hp, 24.0)
+        self.assertEqual(PIONEER_SINGLE_CYLINDER.power_hp, 30.0)
         self.assertLess(PIONEER_SINGLE_CYLINDER.reliability, 0.5)
 
     def test_test_run_does_not_complete_historical_target(self):
