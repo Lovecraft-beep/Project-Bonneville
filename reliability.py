@@ -83,6 +83,7 @@ def resolve_run_failure(
     gearbox=None,
     brake_fade=False,
     sponsor_reliability_bonus=0.0,
+    failure_risk_multiplier=1.0,
 ):
     """Resolve a named failure and whether the team can repair it trackside."""
     engine_failure_probability = calculate_failure_probability(
@@ -110,6 +111,10 @@ def resolve_run_failure(
             (0.20 if brake_fade else 0.01) * speed_factor * team_skill_modifier,
         ),
         (STEERING_VIBRATION, 0.015 * speed_factor * team_skill_modifier),
+    ]
+    failure_events = [
+        (failure_type, probability * max(0.0, failure_risk_multiplier))
+        for failure_type, probability in failure_events
     ]
     failure_probability = min(
         1.0, sum(probability for _, probability in failure_events)

@@ -41,6 +41,7 @@ from historical_records import (
 )
 from management import (
     CampaignRecordAttempt,
+    DEVELOPMENT_PROGRAMS,
     TEAM_RECORD_TARGET_ID,
     advance_turn,
     adjust_vehicle_ratio_trackside,
@@ -51,6 +52,8 @@ from management import (
     calculate_workshop_upgrade_cost,
     complete_failed_run,
     complete_run,
+    development_failure_risk_multiplier,
+    engineering_project_terms,
     fit_trackside_tyres,
     fit_trackside_brakes,
     hire_engineer,
@@ -69,6 +72,7 @@ from management import (
     save_campaign,
     session_runs_remaining,
     sign_sponsor,
+    select_development_program,
     standing_world_record,
     record_chase_target,
     describe_sponsor_objective,
@@ -173,7 +177,7 @@ class BonnevilleApp(tk.Tk):
             self.nav_button(name)
         tk.Label(
             self.sidebar,
-            text="PROJECT\nBONNEVILLE  /  0.5",
+            text="PROJECT\nBONNEVILLE  /  0.6",
             bg=INK,
             fg=MUTED,
             font=(FONT, 9, "bold"),
@@ -467,7 +471,7 @@ class BonnevilleApp(tk.Tk):
 
     def render_research(self):
         page = self.scroll_area()
-        self.page_title(page, "Research & development", "Engineering projects", "Fund a project to reserve its engineers. It advances whenever the campaign moves to its next turn and unlocks only when its schedule is complete.")
+        self.page_title(page, "Research & development", "Engineering projects", "Commit to one major program per historical era, then fund projects to reserve engineers. Projects advance each turn and unlock when their schedule is complete.")
         tk.Label(
             page,
             text=f"Engineers available: {self.campaign.available_engineers} of {self.campaign.team.engineers}  /  GBP {self.campaign.team.cash:,.0f} available",
@@ -475,6 +479,63 @@ class BonnevilleApp(tk.Tk):
             fg=LIME,
             font=(FONT, 10, "bold"),
         ).pack(anchor="w", pady=(0, 12))
+        era = self.campaign.current_era
+        selected_program = self.campaign.development_programs.get(era)
+        self.section(page, f"{era} / major development program")
+        if selected_program:
+            program = DEVELOPMENT_PROGRAMS[selected_program]
+            tk.Label(
+                page,
+                text=f"COMMITTED: {program['name']}  /  changes next era",
+                bg=INK,
+                fg=LIME,
+                font=(FONT, 10, "bold"),
+            ).pack(anchor="w", pady=(0, 4))
+            tk.Label(
+                page,
+                text=program["description"],
+                bg=INK,
+                fg=MUTED,
+                font=(FONT, 9),
+                wraplength=1000,
+                justify="left",
+            ).pack(anchor="w", pady=(0, 12))
+        else:
+            tk.Label(
+                page,
+                text="Choose one direction for this era. The commitment cannot be changed until the next era.",
+                bg=INK,
+                fg=MUTED,
+                font=(FONT, 10),
+                wraplength=1000,
+                justify="left",
+            ).pack(anchor="w", pady=(0, 8))
+            for program_id, program in DEVELOPMENT_PROGRAMS.items():
+                frame = tk.Frame(page, bg=PANEL, padx=14, pady=11)
+                frame.pack(fill="x", pady=3)
+                details = tk.Frame(frame, bg=PANEL)
+                details.pack(side="left", fill="both", expand=True)
+                tk.Label(
+                    details,
+                    text=program["name"],
+                    bg=PANEL,
+                    fg=PAPER,
+                    font=(DISPLAY_FONT, 14, "bold"),
+                ).pack(anchor="w")
+                tk.Label(
+                    details,
+                    text=program["description"],
+                    bg=PANEL,
+                    fg=MUTED,
+                    font=(FONT, 9),
+                    wraplength=760,
+                    justify="left",
+                ).pack(anchor="w", pady=(3, 0))
+                self.action_button(
+                    frame,
+                    "COMMIT",
+                    lambda selected=program_id: self.commit_development_program(selected),
+                )
         if self.campaign.engineering_projects:
             self.section(page, "Active projects")
             for project in self.campaign.engineering_projects:
@@ -498,6 +559,14 @@ class BonnevilleApp(tk.Tk):
                 font=(FONT, 9, "bold"), padx=13, pady=10, cursor="hand2",
             ).pack(side="left", padx=(0, 5))
         self._render_research_nodes(page)
+
+    def commit_development_program(self, program_id):
+        try:
+            select_development_program(self.campaign, program_id)
+            save_campaign(self.campaign)
+        except ValueError as exc:
+            messagebox.showerror("Program unavailable", str(exc), parent=self)
+        self.show_page("Research")
 
     def set_research_branch(self, branch):
         self.research_branch = branch
@@ -528,16 +597,34 @@ class BonnevilleApp(tk.Tk):
         tree, researched, shared_researched = self._research_data()
         researched_set = set(researched)
         combined = researched_set | set(shared_researched)
+        branch_key = {"Tyres": "tyre", "Brakes": "brake"}.get(
+            self.research_branch, self.research_branch.lower()
+        )
+        program_missing = self.campaign.current_era not in self.campaign.development_programs
         active_ids = {
             project.technology_id
             for project in self.campaign.engineering_projects
         }
-        ready = [node for node in tree if node.technology_id not in researched_set and node.technology_id not in active_ids and set(node.prerequisites).issubset(combined)]
+        ready = [
+            node
+            for node in tree
+            if node.technology_id not in researched_set
+            and node.technology_id not in active_ids
+            and set(node.prerequisites).issubset(combined)
+            and not (node.era == self.campaign.current_era and program_missing)
+        ]
         for node in tree:
             is_done = node.technology_id in researched_set
             project = next((item for item in self.campaign.engineering_projects if item.technology_id == node.technology_id), None)
             is_ready = node in ready
-            status = "COMPLETE" if is_done else "IN PROGRESS" if project else "AVAILABLE" if is_ready else "LOCKED"
+            prerequisites_met = set(node.prerequisites).issubset(combined)
+            needs_program = (
+                node.era == self.campaign.current_era
+                and program_missing
+                and prerequisites_met
+            )
+            status = "COMPLETE" if is_done else "IN PROGRESS" if project else "PROGRAM REQUIRED" if needs_program else "AVAILABLE" if is_ready else "LOCKED"
+            cost, turns = engineering_project_terms(self.campaign, branch_key, node)
             card = tk.Frame(parent, bg=PANEL, padx=16, pady=13)
             card.pack(fill="x", pady=4)
             row = tk.Frame(card, bg=PANEL)
@@ -546,7 +633,7 @@ class BonnevilleApp(tk.Tk):
             info.pack(side="left", fill="both", expand=True)
             tk.Label(info, text=f"{node.era.upper()}  /  {status}", bg=PANEL, fg=LIME if is_done else ACCENT if is_ready else MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
             tk.Label(info, text=node.name, bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 16, "bold")).pack(anchor="w", pady=(4, 2))
-            tk.Label(info, text=f"Cost: GBP {node.cost_gbp:,.0f}    /    Engineers: {node.engineers_required}    /    Time: {node.turns_required} turns\n{node.description or 'Prerequisites: ' + (', '.join(node.prerequisites) or 'None')}", bg=PANEL, fg=MUTED, font=(FONT, 9), wraplength=690, justify="left").pack(anchor="w")
+            tk.Label(info, text=f"Cost: GBP {cost:,.0f}    /    Engineers: {node.engineers_required}    /    Time: {turns} turns\n{node.description or 'Prerequisites: ' + (', '.join(node.prerequisites) or 'None')}", bg=PANEL, fg=MUTED, font=(FONT, 9), wraplength=690, justify="left").pack(anchor="w")
             if is_ready:
                 tk.Button(row, text="START PROJECT", command=lambda tech=node: self.research(tech), bg=ACCENT, fg=INK, activebackground=LIME, relief="flat", borderwidth=0, font=(FONT, 9, "bold"), padx=14, pady=10, cursor="hand2").pack(side="right", padx=(12, 0))
             elif project:
@@ -1480,6 +1567,9 @@ class BonnevilleApp(tk.Tk):
             gearbox=vehicle.gearbox,
             brake_fade=any(sample.brake_fade for sample in result.telemetry),
             sponsor_reliability_bonus=self.campaign.sponsorship.reliability_bonus,
+            failure_risk_multiplier=development_failure_risk_multiplier(
+                self.campaign
+            ),
         )
         append_run_log(vehicle, track, result, outcome=outcome)
         self.last_record_message = None

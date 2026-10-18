@@ -15,7 +15,6 @@ from campaign_world import (
     advance_world,
     create_world_state,
     historical_record_at,
-    synchronize_rivals,
 )
 from historical_records import (
     HISTORICAL_TARGETS,
@@ -34,6 +33,7 @@ from research import (
     GEARBOX_TECHNOLOGY_BY_ID,
     TECHNOLOGY_NAME_BY_ID,
     TYRE_TECHNOLOGY_BY_ID,
+    era_for_year,
 )
 from sponsors import (
     RUNS_OBJECTIVE,
@@ -57,6 +57,30 @@ WORKSHOP_UPGRADE_BASE_COST_GBP = 10_000.0
 TRACKSIDE_ADJUSTMENT_COST_GBP = 5.0
 MAX_TESTS_PER_SESSION = 8
 MAX_RECORD_RUNS_PER_SESSION = 8
+DEVELOPMENT_PROGRAMS = {
+    "aerodynamic_pioneer": {
+        "name": "Aerodynamic Pioneer",
+        "description": "Aerodynamics projects cost 20% less and finish one season sooner; engine projects cost 25% more and take one extra season.",
+        "preferred_branches": ("aerodynamics",),
+        "penalized_branches": ("engine",),
+        "failure_risk_multiplier": 1.0,
+    },
+    "power_gambler": {
+        "name": "Horsepower Gambler",
+        "description": "Engine projects cost 20% less and finish one season sooner; aero projects cost 25% more and take one extra season. Run failure risk rises 15%.",
+        "preferred_branches": ("engine",),
+        "penalized_branches": ("aerodynamics",),
+        "failure_risk_multiplier": 1.15,
+    },
+    "engineering_perfectionist": {
+        "name": "Engineering Perfectionist",
+        "description": "Chassis, gearbox, tyre, and brake projects cost 20% less and finish one season sooner. Run failure risk falls 25%; engine and aero projects cost 25% more and take one extra season.",
+        "preferred_branches": ("chassis", "gearbox", "tyre", "brake"),
+        "penalized_branches": ("engine", "aerodynamics"),
+        "failure_risk_multiplier": 0.75,
+    },
+}
+DEVELOPMENT_PROGRAM_COST_FACTORS = {"preferred": 0.8, "penalized": 1.25}
 
 
 @dataclass
@@ -267,6 +291,7 @@ class CampaignState:
     campaign_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     current_year: int = STARTING_YEAR
     current_day_of_year: int = 1
+    development_programs: dict[str, str] = field(default_factory=dict)
     turn_number: int = 1
     tests_this_session: int = 0
     record_runs_this_session: int = 0
@@ -284,17 +309,12 @@ class CampaignState:
         return SEASONS[self.season_index]
 
     @property
-    def season_index(self):
-        return sum(self.current_day_of_year >= day for day in SEASON_START_DAYS) - 1
+    def current_era(self):
+        return era_for_year(self.current_year).name
 
     @property
-    def funds_gbp(self):
-        """Compatibility view of the team's available cash."""
-        return self.team.cash
-
-    @funds_gbp.setter
-    def funds_gbp(self, value):
-        self.team.cash = value
+    def season_index(self):
+        return sum(self.current_day_of_year >= day for day in SEASON_START_DAYS) - 1
 
     @property
     def allocated_engineers(self):
@@ -355,68 +375,33 @@ def load_campaign(path=CAMPAIGN_FILE):
     with path.open("r", encoding="utf-8") as campaign_file:
         data = json.load(campaign_file)
 
-    if "team" in data:
-        data["team"] = Team(**data["team"])
-        data["research"] = ResearchState(**data.get("research", {}))
-        data["engineering_projects"] = [
-            EngineeringProject(**project)
-            for project in data.get("engineering_projects", [])
-        ]
-        sponsorship_data = dict(data.get("sponsorship", {}))
-        sponsorship_data["objectives"] = [
-            SponsorObjective(**objective)
-            for objective in sponsorship_data.get("objectives", [])
-        ]
-        data["sponsorship"] = SponsorshipState(**sponsorship_data)
-        garage_data = data.get("garage", {})
-        data["garage"] = Garage(
-            vehicles=[
-                GarageVehicle(**vehicle) for vehicle in garage_data.get("vehicles", [])
-            ],
-            museum=[
-                GarageVehicle(**vehicle) for vehicle in garage_data.get("museum", [])
-            ],
-        )
-        record_attempt_data = data.get("record_attempt")
-        data["record_attempt"] = (
-            CampaignRecordAttempt(**record_attempt_data)
-            if record_attempt_data is not None
-            else None
-        )
-        data.setdefault(
-            "completed_historical_record_ids",
-            record_ids_achieved_by_speed(data.get("best_measured_mile_speed_mph", 0.0)),
-        )
-        world_data = data.get("world", {})
-        data["world"] = WorldState(
-            rivals=[RivalState(**rival) for rival in world_data.get("rivals", [])]
-            or create_world_state().rivals,
-            headlines=world_data.get("headlines", [])
-            or create_world_state().headlines,
-            reactions=world_data.get("reactions", []),
-            historical_events_seen=world_data.get("historical_events_seen", []),
-            historical_attempts_seen=world_data.get("historical_attempts_seen", []),
-            record_speed_mph=world_data.get("record_speed_mph", 0.0),
-            record_holder=world_data.get("record_holder", ""),
-            record_year=world_data.get("record_year", 0),
-        )
-        campaign = CampaignState(**data)
-        synchronize_rivals(campaign.world)
-        if "historical_attempts_seen" not in world_data:
-            headlines = campaign.world.headlines
-            reactions = campaign.world.reactions
-            advance_world(campaign)
-            campaign.world.headlines = headlines
-            campaign.world.reactions = reactions
-        # Saves from before sponsor objectives existed need a first demand per sponsor.
-        for sponsor_id in campaign.sponsorship.active_sponsors:
-            if campaign.sponsorship.objective_for(sponsor_id) is None:
-                issue_sponsor_objective(campaign, sponsor_id)
-        return campaign
-
-    # Migrate campaign files written before Team became the owner of cash.
-    team = Team(cash=data.pop("funds_gbp", STARTING_FUNDS_GBP))
-    return CampaignState(team=team, **data)
+    data["team"] = Team(**data["team"])
+    data["research"] = ResearchState(**data["research"])
+    data["engineering_projects"] = [
+        EngineeringProject(**project)
+        for project in data["engineering_projects"]
+    ]
+    sponsorship_data = data["sponsorship"]
+    sponsorship_data["objectives"] = [
+        SponsorObjective(**objective)
+        for objective in sponsorship_data["objectives"]
+    ]
+    data["sponsorship"] = SponsorshipState(**sponsorship_data)
+    garage_data = data["garage"]
+    data["garage"] = Garage(
+        vehicles=[GarageVehicle(**vehicle) for vehicle in garage_data["vehicles"]],
+        museum=[GarageVehicle(**vehicle) for vehicle in garage_data["museum"]],
+    )
+    record_attempt_data = data["record_attempt"]
+    data["record_attempt"] = (
+        CampaignRecordAttempt(**record_attempt_data)
+        if record_attempt_data is not None
+        else None
+    )
+    world_data = data["world"]
+    world_data["rivals"] = [RivalState(**rival) for rival in world_data["rivals"]]
+    data["world"] = WorldState(**world_data)
+    return CampaignState(**data)
 
 
 def save_campaign(campaign, path=CAMPAIGN_FILE):
@@ -434,10 +419,10 @@ def complete_run(
     record_attempt_average_mph=None,
 ):
     """Charge a completed run and update campaign performance."""
-    if run_cost_gbp > campaign.funds_gbp:
+    if run_cost_gbp > campaign.team.cash:
         raise ValueError("campaign does not have enough funds for this run")
 
-    campaign.funds_gbp = round(campaign.funds_gbp - run_cost_gbp, 2)
+    campaign.team.cash = round(campaign.team.cash - run_cost_gbp, 2)
     campaign.completed_runs += 1
     is_new_record = measured_mile_speed_mph > campaign.best_measured_mile_speed_mph
     campaign.best_measured_mile_speed_mph = max(
@@ -661,10 +646,10 @@ def _expire_sponsor_objectives(campaign):
 
 def complete_failed_run(campaign, run_cost_gbp):
     """Charge a run that failed and could not be repaired trackside."""
-    if run_cost_gbp > campaign.funds_gbp:
+    if run_cost_gbp > campaign.team.cash:
         raise ValueError("campaign does not have enough funds for this run")
 
-    campaign.funds_gbp = round(campaign.funds_gbp - run_cost_gbp, 2)
+    campaign.team.cash = round(campaign.team.cash - run_cost_gbp, 2)
     campaign.failed_runs += 1
 
 
@@ -811,12 +796,22 @@ def start_engineering_project(campaign, branch, technology_id):
         available_prerequisites.update(getattr(campaign.research, attribute))
     if not set(technology.prerequisites).issubset(available_prerequisites):
         raise ValueError(f"prerequisites not met for {technology.name}")
-    if campaign.team.cash < technology.cost_gbp:
+    if (
+        technology.era == campaign.current_era
+        and technology.era not in campaign.development_programs
+    ):
+        raise ValueError(
+            f"choose a major development program for {technology.era} first"
+        )
+
+    project_cost, turns_required = engineering_project_terms(
+        campaign, branch, technology
+    )
+    if campaign.team.cash < project_cost:
         raise ValueError("insufficient funds for this engineering project")
     if campaign.available_engineers < technology.engineers_required:
         raise ValueError("not enough unassigned engineers for this project")
 
-    turns_required = max(1, technology.turns_required)
     project = EngineeringProject(
         branch=branch,
         technology_id=technology_id,
@@ -824,9 +819,51 @@ def start_engineering_project(campaign, branch, technology_id):
         turns_remaining=turns_required,
         engineers_required=technology.engineers_required,
     )
-    campaign.team.cash = round(campaign.team.cash - technology.cost_gbp, 2)
+    campaign.team.cash = round(campaign.team.cash - project_cost, 2)
     campaign.engineering_projects.append(project)
     return project
+
+
+def engineering_project_terms(campaign, branch, technology):
+    """Return the quoted cost and duration under the selected era program."""
+    program = DEVELOPMENT_PROGRAMS.get(
+        campaign.development_programs.get(technology.era)
+    )
+    cost_factor = 1.0
+    turn_adjustment = 0
+    if program:
+        if branch in program["preferred_branches"]:
+            cost_factor = DEVELOPMENT_PROGRAM_COST_FACTORS["preferred"]
+            turn_adjustment = -1
+        elif branch in program["penalized_branches"]:
+            cost_factor = DEVELOPMENT_PROGRAM_COST_FACTORS["penalized"]
+            turn_adjustment = 1
+    project_cost = round(technology.cost_gbp * cost_factor, 2)
+    turns_required = max(1, technology.turns_required + turn_adjustment)
+    return project_cost, turns_required
+
+
+def select_development_program(campaign, program_id):
+    """Commit the team to one major program for the current historical era."""
+    if program_id not in DEVELOPMENT_PROGRAMS:
+        raise ValueError(f"unknown development program: {program_id}")
+    era = campaign.current_era
+    if era in campaign.development_programs:
+        raise ValueError(f"a development program is already committed for {era}")
+    campaign.development_programs[era] = program_id
+    campaign.world.headlines.append(
+        f"DEVELOPMENT PROGRAM: {DEVELOPMENT_PROGRAMS[program_id]['name']} selected for {era}."
+    )
+    del campaign.world.headlines[:-8]
+    return program_id
+
+
+def development_failure_risk_multiplier(campaign):
+    """Return the active era program's run-failure risk multiplier."""
+    program = DEVELOPMENT_PROGRAMS.get(
+        campaign.development_programs.get(campaign.current_era)
+    )
+    return program["failure_risk_multiplier"] if program else 1.0
 
 
 def _complete_engineering_project(campaign, project):

@@ -130,6 +130,55 @@ def _remember(items, message, limit=8):
     del items[:-limit]
 
 
+def _report_record_challengers(campaign, campaign_date):
+    team_record = max(
+        campaign.official_record_mph,
+        max(
+            (
+                target.speed_mph
+                for target in HISTORICAL_TARGETS
+                if target.record_id in campaign.completed_historical_record_ids
+            ),
+            default=0.0,
+        ),
+    )
+    if team_record <= 0:
+        return
+
+    closest_rival = max(
+        campaign.world.rivals,
+        key=lambda rival: rival.best_speed_mph,
+        default=None,
+    )
+    if (
+        closest_rival
+        and team_record * 0.9 <= closest_rival.best_speed_mph < team_record
+    ):
+        _remember(
+            campaign.world.headlines,
+            f"CHALLENGE WATCH: {closest_rival.name} is within "
+            f"{team_record - closest_rival.best_speed_mph:.1f} mph of your "
+            f"{team_record:.1f} mph record at {closest_rival.best_speed_mph:.1f} mph.",
+        )
+
+    future_challenger = next(
+        (
+            target
+            for target in sorted(HISTORICAL_TARGETS, key=lambda item: item.date)
+            if target.date > campaign_date.isoformat()
+            and target.speed_mph > team_record
+        ),
+        None,
+    )
+    if future_challenger:
+        _remember(
+            campaign.world.headlines,
+            f"DEVELOPMENT WATCH: {future_challenger.driver}'s team is preparing "
+            f"{future_challenger.vehicle}, a {future_challenger.speed_mph:.1f} mph "
+            f"threat to your {team_record:.1f} mph record in {future_challenger.year}.",
+        )
+
+
 def advance_world(campaign):
     """Advance rival standings and create the new season's world report."""
     world = campaign.world
@@ -178,6 +227,8 @@ def advance_world(campaign):
         world.historical_events_seen.append(event.event_id)
         _remember(world.headlines, f"HISTORICAL EVENT: {event.headline}")
         _remember(world.reactions, event.reaction)
+
+    _report_record_challengers(campaign, campaign_date)
 
     if campaign.best_measured_mile_speed_mph:
         rival_leader = max(

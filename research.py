@@ -567,6 +567,12 @@ GEARBOX_TECHNOLOGY_BY_ID = {
     node.technology_id: node for node in GEARBOX_TECHNOLOGY_TREE
 }
 ERA_BY_NAME = {era.name: era for era in ERAS}
+def era_for_year(year):
+    """Return the historical research era containing a campaign year."""
+    for era in ERAS:
+        if year >= era.year_start and (era.year_end is None or year <= era.year_end):
+            return era
+    return ERAS[0] if year < ERAS[0].year_start else ERAS[-1]
 TECHNOLOGY_NAME_BY_ID = {
     node.technology_id: node.name
     for tree in (

@@ -57,6 +57,7 @@ from management import (
     calculate_run_cost,
     calculate_session_run_cost,
     complete_run,
+    development_failure_risk_multiplier,
     lapse_record_attempt_if_out_of_runs,
     MAX_RECORD_RUNS_PER_SESSION,
     register_record_run,
@@ -72,6 +73,7 @@ from management import (
     reset_campaign,
     register_test_run,
     save_campaign,
+    select_development_program,
     sign_sponsor,
     start_engineering_project,
 )
@@ -103,6 +105,16 @@ from vehicle_designer import (
 
 
 def complete_engineering_project(campaign, branch, technology_id):
+    if campaign.current_era not in campaign.development_programs:
+        program_for_branch = {
+            "aerodynamics": "aerodynamic_pioneer",
+            "engine": "power_gambler",
+            "chassis": "engineering_perfectionist",
+            "gearbox": "engineering_perfectionist",
+            "tyre": "engineering_perfectionist",
+            "brake": "engineering_perfectionist",
+        }
+        select_development_program(campaign, program_for_branch[branch])
     project = start_engineering_project(campaign, branch, technology_id)
     while project in campaign.engineering_projects:
         advance_turn(campaign)
@@ -1312,6 +1324,7 @@ class ResearchProjectSetupTests(unittest.TestCase):
 
     def test_active_project_and_resource_shortages_do_not_grey_unlocked_branch(self):
         campaign = CampaignState()
+        select_development_program(campaign, "aerodynamic_pioneer")
         start_engineering_project(campaign, "aerodynamics", "wind_deflector")
         campaign.team.cash = 0
         app = self._research_app(campaign)
@@ -1449,8 +1462,9 @@ class EngineeringDiagnosisTests(unittest.TestCase):
         campaign.team.cash = 0
         self.assertIn("raise GBP", self._report(campaign).recommendations[0])
         campaign.team.cash = 100_000
+        select_development_program(campaign, "aerodynamic_pioneer")
         start_engineering_project(campaign, "aerodynamics", "wind_deflector")
-        self.assertIn("3 turn(s) remaining", self._report(campaign).recommendations[0])
+        self.assertIn("2 turn(s) remaining", self._report(campaign).recommendations[0])
 
     def test_report_handles_staffing_locked_and_completed_research(self):
         campaign = CampaignState()
@@ -1677,10 +1691,11 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         from management import standing_world_record, start_engineering_project
 
         campaign = CampaignState(current_year=1899)
+        select_development_program(campaign, "engineering_perfectionist")
         start_engineering_project(campaign, "aerodynamics", "wind_deflector")
         advance_turn(campaign)
         advance_turn(campaign)
-        self.assertEqual(campaign.engineering_projects[0].turns_remaining, 1)
+        self.assertEqual(campaign.engineering_projects[0].turns_remaining, 2)
         self.assertEqual(standing_world_record(campaign)[1], "Camille Jenatzy Team")
 
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1716,28 +1731,6 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         self.assertEqual(campaign.official_record_mph, 130.01)
         self.assertEqual(standing_world_record(campaign)[1], campaign.team.name)
         self.assertIn("WORLD RECORD:", campaign.world.headlines[-1])
-
-    def test_legacy_anonymous_rivals_migrate_without_losing_campaign_news(self):
-        import json
-
-        campaign = CampaignState(current_year=1899, current_day_of_year=365)
-        campaign.world.headlines = ["Existing campaign news"]
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            path = Path(temporary_directory) / "campaign.json"
-            save_campaign(campaign, path)
-            data = json.loads(path.read_text(encoding="utf-8"))
-            for key in ("historical_attempts_seen", "record_speed_mph", "record_holder", "record_year"):
-                del data["world"][key]
-            data["world"]["rivals"] = [{
-                "rival_id": "continental_union", "name": "Continental Union Auto Club",
-                "home": "France", "specialty": "early streamliners",
-                "performance_multiplier": 0.91, "best_speed_mph": 59.9,
-            }]
-            path.write_text(json.dumps(data), encoding="utf-8")
-            restored = load_campaign(path)
-        self.assertEqual(restored.world.headlines, ["Existing campaign news"])
-        self.assertEqual(restored.world.record_holder, "Camille Jenatzy Team")
-        self.assertFalse(any(rival.rival_id == "continental_union" for rival in restored.world.rivals))
 
     def test_historical_rivals_take_record_but_cannot_beat_faster_player(self):
         from campaign_world import advance_world

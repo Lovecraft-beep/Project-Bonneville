@@ -12,11 +12,13 @@ record attempts.
 
 ## Current Prototype
 
-Version 0.5 introduces a button-driven desktop interface with a campaign
-dashboard, research tree, vehicle garage and designer, test-run setup, and
-speed/acceleration telemetry graphs. It uses Tkinter from the Python standard
-library and keeps the existing campaign, vehicle, reliability, and simulation
-rules.
+Version 0.6 develops the prototype into a strategy-focused campaign. Each
+historical era requires one binding major development program, with distinct
+research costs, timelines, and reliability tradeoffs. Record holders can make
+official attempts to extend their own mark, researched technology can unlock
+historically early components, and retired vehicles are preserved in a separate
+Museum. The button-driven Tkinter interface includes the campaign dashboard,
+research tree, garage and vehicle designer, test-run setup, and telemetry views.
 
 The simulation models:
 
@@ -100,10 +102,25 @@ sample when the run ends between intervals.
 
 ## Research Progression
 
-Only aerodynamics research is available at the start of a new campaign. Complete
-the opening projects in this order to unlock chassis development:
+Choose one major development program per era before starting that era's
+engineering projects. The choice is permanent for that era:
 
-| Project | Required completed research | Turn advances to complete |
+- **Aerodynamic Pioneer:** Aero projects cost 20% less and finish one season
+  sooner; engine projects cost 25% more and take one extra season.
+- **Horsepower Gambler:** Engine projects cost 20% less and finish one season
+  sooner; aero projects cost 25% more and take one extra season. Run failure risk
+  rises by 15%.
+- **Engineering Perfectionist:** Chassis, gearbox, tyre, and brake projects cost
+  20% less and finish one season sooner. Engine and aero projects cost 25% more
+  and take one extra season; run failure risk falls by 25%.
+
+The next era opens a new choice. Unchosen research remains available, but its
+projects may take longer and cost more under the selected program.
+
+Only aerodynamics research is otherwise available at the start of a new
+campaign. Its base project times are:
+
+| Project | Required completed research | Base turn advances to complete |
 | --- | --- | --- |
 | Wind Deflector | None | 3 |
 | Wheel Fairings / Spats | Wind Deflector | 3 |
@@ -118,13 +135,12 @@ Completing Carriage Frame then unlocks these projects in their respective tabs:
 - **Tyres:** Pneumatic Racing Tyres
 - **Brakes:** Mechanical Drum Brakes
 
-From a fresh campaign, this means nine turn advances before Carriage Frame can
-be started, and another three to complete it and open those branches. Starting a
-project does not advance time; **End turn** progresses active projects by one
-season. Wind Deflector started in Spring 1895 completes in Winter 1895, and the
-four opening projects can be completed by Spring 1898. Research becomes available
-through completed prerequisites, not merely by reaching a particular calendar
-year.
+Under Aerodynamic Pioneer, the first three aero projects each take two seasonal
+turns, so Carriage Frame becomes available after six turn advances. It then takes
+three turns under that program, completing in Summer 1897 when started as soon
+as it unlocks. Starting a project does not advance time; **End turn** progresses
+active projects by one season. Research becomes available through completed
+prerequisites, not merely by reaching a particular calendar year.
 
 The starting team has one engineer, and each opening project reserves that
 engineer until completion, so only one can run at a time. Later projects may
@@ -342,6 +358,7 @@ Project Bonneville has evolved from a land speed record simulator into an engine
 #### Research & Development
 
 - Multi-turn engineering projects
+- Binding, era-specific development programs with project and reliability tradeoffs
 - Research prerequisites and unlock chains
 - Aerodynamics, chassis, engine, tyre, and brake technology progression
 - Technology era structure supporting future expansion
@@ -395,7 +412,8 @@ Rivals can take the world record, but cannot displace a faster official player
 record. Practice personal bests do not count as official records. The dashboard
 shows official team standings and record announcements, and a new rival world
 record triggers an end-turn notice. Standings, record ownership, and processed
-attempts survive save/load; older anonymous-rival saves migrate automatically.
+attempts survive current-format save/load. Official record attempts can challenge
+a rival mark or extend the team's own record.
 
 #### Sponsorship and Stakeholder Pressure
 
