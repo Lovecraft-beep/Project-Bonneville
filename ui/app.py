@@ -36,12 +36,12 @@ from historical_records import (
     HISTORICAL_TARGETS,
     average_record_speed,
     current_world_record,
-    next_historical_target,
     required_record_runs,
     target_completed,
 )
 from management import (
     CampaignRecordAttempt,
+    TEAM_RECORD_TARGET_ID,
     advance_turn,
     adjust_vehicle_ratio_trackside,
     apply_gear_ratios_trackside,
@@ -64,11 +64,13 @@ from management import (
     reset_campaign,
     register_record_run,
     register_test_run,
+    record_attempt_target,
     retire_vehicle,
     save_campaign,
     session_runs_remaining,
     sign_sponsor,
     standing_world_record,
+    record_chase_target,
     describe_sponsor_objective,
     start_engineering_project,
     TRACKSIDE_ADJUSTMENT_COST_GBP,
@@ -106,9 +108,9 @@ DISPLAY_FONT = "Georgia"
 
 
 def record_gap_headline(target, best_speed_mph):
-    """Summarise how far the team's best is from the next historical target."""
+    """Summarise the team's gap to a rival's standing record, if any."""
     if target is None:
-        return "All records beaten"
+        return "No rival record to chase"
     gap = target.speed_mph - best_speed_mph
     if gap > 0:
         return f"{gap:.1f} mph short"
@@ -167,7 +169,7 @@ class BonnevilleApp(tk.Tk):
             pady=28,
         ).pack(anchor="w")
         tk.Frame(self.sidebar, bg=ACCENT, height=3).pack(fill="x", padx=22, pady=(0, 20))
-        for name in ("Dashboard", "Research", "Garage", "Test Runs", "Test Facility", "Team Debrief", "Telemetry", "Team", "Records", "Challenges", "Encyclopedia"):
+        for name in ("Dashboard", "Research", "Garage", "Museum", "Test Runs", "Test Facility", "Team Debrief", "Telemetry", "Team", "Records", "Challenges", "Encyclopedia"):
             self.nav_button(name)
         tk.Label(
             self.sidebar,
@@ -232,11 +234,7 @@ class BonnevilleApp(tk.Tk):
         self.header_status.pack(side="right", anchor="center")
 
     def _refresh_header(self):
-        target = next_historical_target(
-            self.campaign.current_year,
-            self.campaign.completed_historical_record_ids,
-            self.campaign.current_day_of_year,
-        )
+        target = record_chase_target(self.campaign)
         gap = record_gap_headline(target, self.campaign.best_measured_mile_speed_mph)
         self.header_status.configure(
             text=f"{self.campaign.current_season.upper()} {self.campaign.current_year}  /  TURN {self.campaign.turn_number}     GBP {self.campaign.team.cash:,.0f}     {gap.upper()}"
@@ -277,6 +275,7 @@ class BonnevilleApp(tk.Tk):
             "Dashboard": self.render_dashboard,
             "Research": self.render_research,
             "Garage": self.render_garage,
+            "Museum": self.render_museum,
             "Test Runs": self.render_test_runs,
             "Trackside Modifications": self.render_trackside_modifications,
             "Test Facility": self.render_test_facility,
@@ -377,11 +376,7 @@ class BonnevilleApp(tk.Tk):
 
     def render_dashboard(self):
         page = self.scroll_area()
-        target = next_historical_target(
-            self.campaign.current_year,
-            self.campaign.completed_historical_record_ids,
-            self.campaign.current_day_of_year,
-        )
+        target = record_chase_target(self.campaign)
         self.page_title(
             page,
             "Operations / Season",
@@ -402,7 +397,7 @@ class BonnevilleApp(tk.Tk):
             (
                 "Gap to target",
                 record_gap_headline(target, best),
-                f"{target.year} {target.vehicle} / {target.speed_mph:.1f} mph" if target else "All records beaten",
+                f"{target.year} {target.vehicle} / {target.speed_mph:.1f} mph" if target else "No rival has set a faster mark",
             ),
         )
         chase_row = tk.Frame(page, bg=INK)
@@ -448,7 +443,7 @@ class BonnevilleApp(tk.Tk):
             tk.Label(right, text=f"{target.speed_mph:.1f} mph target  |  {gap:.1f} mph to go\n{target.milestone}", bg=INK, fg=MUTED, font=(FONT, 10), justify="left").pack(anchor="w", pady=8)
             self.action_button(right, "Attempt historical record", self.start_record_attempt, True)
         else:
-            tk.Label(right, text="All campaign records achieved.", bg=INK, fg=LIME, font=(FONT, 13, "bold")).pack(anchor="w")
+            tk.Label(right, text="No faster rival record has been set yet.", bg=INK, fg=LIME, font=(FONT, 13, "bold")).pack(anchor="w")
         self.section(page, "Sponsor demands")
         self._render_sponsor_objectives(page)
         self.section(page, "Rival standings / official records")
@@ -618,11 +613,11 @@ class BonnevilleApp(tk.Tk):
             return
         self.advance_campaign_turn()
         save_campaign(self.campaign)
-        self.show_page(self.page if self.page != "Trackside Modifications" else "Dashboard")
+        self.show_page("Dashboard")
 
     def render_garage(self):
         page = self.scroll_area()
-        self.page_title(page, "Vehicle department", "Garage", "Built vehicles retain their installed components between tests. Select a vehicle to inspect, tune, or replace components.")
+        self.page_title(page, "Vehicle department", "Garage", "Active campaign vehicles retain their installed components between tests. Select a vehicle to inspect, tune, or replace components.")
         if self.campaign.record_attempt is None:
             self.action_button(page, "+  DESIGN NEW VEHICLE", self.start_vehicle_builder, True)
         else:
@@ -639,14 +634,52 @@ class BonnevilleApp(tk.Tk):
                 tk.Label(frame, text=vehicle.name, bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 17, "bold")).pack(anchor="w")
                 tk.Label(frame, text=f"{vehicle.engine.name}  /  {vehicle.engine.power_hp:,.0f} hp     {vehicle.gearbox.name}     {vehicle.mass:,.0f} kg", bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(anchor="w", pady=(4, 10))
                 self.action_button(frame, "OPEN VEHICLE", lambda item=entry: self.open_garage_vehicle(item))
-        if self.campaign.garage.museum:
-            self.section(page, f"Museum  /  {len(self.campaign.garage.museum)} retired designs")
-            for entry in self.campaign.garage.museum:
-                vehicle = build_vehicle_from_garage_entry(entry)
-                row = tk.Frame(page, bg=PANEL, padx=16, pady=12)
-                row.pack(fill="x", pady=3)
-                tk.Label(row, text=vehicle.name, bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 15, "bold")).pack(anchor="w")
-                tk.Label(row, text=f"{vehicle.engine.name}  /  {vehicle.engine.power_hp:,.0f} hp     {vehicle.gearbox.name}     {vehicle.mass:,.0f} kg", bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(anchor="w", pady=(4, 0))
+
+    def render_museum(self):
+        page = self.scroll_area()
+        retired = self.campaign.garage.museum
+        self.page_title(
+            page,
+            "Vehicle archive",
+            "Museum",
+            f"{len(retired)} retired design{'s' if len(retired) != 1 else ''} preserved from the campaign fleet.",
+        )
+        if not retired:
+            self.section(page, "No retired vehicles")
+            tk.Label(
+                page,
+                text="Vehicles retired from the Garage will be preserved here.",
+                bg=INK,
+                fg=MUTED,
+                font=(FONT, 11),
+            ).pack(anchor="w")
+            return
+
+        self.section(page, f"{len(retired)} retired designs")
+        for entry in retired:
+            vehicle = build_vehicle_from_garage_entry(entry)
+            row = tk.Frame(page, bg=PANEL, padx=16, pady=14)
+            row.pack(fill="x", pady=4)
+            tk.Label(
+                row,
+                text=vehicle.name,
+                bg=PANEL,
+                fg=PAPER,
+                font=(DISPLAY_FONT, 17, "bold"),
+            ).pack(anchor="w")
+            tk.Label(
+                row,
+                text=(
+                    f"{vehicle.engine.name}  /  {vehicle.engine.power_hp:,.0f} hp"
+                    f"     {vehicle.gearbox.name}  /  {vehicle.brakes.name}"
+                    f"     {vehicle.mass:,.0f} kg  /  {vehicle.tyre_grip_factor:.2f} grip"
+                ),
+                bg=PANEL,
+                fg=MUTED,
+                font=(FONT, 9),
+                wraplength=980,
+                justify="left",
+            ).pack(anchor="w", pady=(4, 0))
 
     def open_garage_vehicle(self, entry):
         self.selected_vehicle = entry
@@ -713,7 +746,10 @@ class BonnevilleApp(tk.Tk):
         elif component == "gearbox":
             choices = (DIRECT_DRIVE,) if entry.engine_name in AVAILABLE_ENGINES and AVAILABLE_ENGINES[entry.engine_name].torque_curve_type in ("turbojet", "rocket") else TRANSMISSION_CATALOG
         else:
-            choices = available_brakes(self.campaign.current_year)
+            choices = available_brakes(
+                self.campaign.current_year,
+                self.campaign.research.brake_technology,
+            )
         window = tk.Toplevel(self)
         window.title(f"Replace {component}")
         window.configure(bg=INK)
@@ -968,7 +1004,10 @@ class BonnevilleApp(tk.Tk):
                 )
                 self.action_button(page, f"{item.name}  /  {item.gear_count} gears  /  {item.efficiency:.0%} efficiency  /  GBP {item.cost_gbp:,.0f}{ratio_label}", lambda value=item: self.builder_select("gearbox", value))
         elif step == "brakes":
-            for item in available_brakes(self.campaign.current_year):
+            for item in available_brakes(
+                self.campaign.current_year,
+                self.campaign.research.brake_technology,
+            ):
                 self.action_button(page, f"{item.name}  /  {item.max_braking_g:.2f} g  /  GBP {item.cost_gbp:,.0f}", lambda value=item: self.builder_select("brakes", value))
         else:
             self.section(page, "Pre-fitted aerodynamics")
@@ -1170,17 +1209,26 @@ class BonnevilleApp(tk.Tk):
             self.section(page, "Garage vehicles")
             for entry in self.campaign.garage.vehicles:
                 self.action_button(page, f"{entry.vehicle_name}  /  {entry.engine_name}  /  {entry.gearbox_name}", lambda selected=entry: self.choose_track_for_vehicle(selected))
-        target = next_historical_target(
-            self.campaign.current_year,
-            self.campaign.completed_historical_record_ids,
-            self.campaign.current_day_of_year,
-        )
+        target = record_chase_target(self.campaign)
         if target:
-            self.section(page, "Historical record attempt")
+            self.section(page, "Official record attempt")
             if session_runs_remaining(self.campaign, record=True) >= required_record_runs(self.campaign.current_year):
-                self.action_button(page, f"Attempt {target.year} {target.vehicle}  /  {target.speed_mph:.1f} mph", self.start_record_attempt, True)
+                action = (
+                    f"EXTEND TEAM RECORD / {target.speed_mph:.1f} mph"
+                    if target.record_id == TEAM_RECORD_TARGET_ID
+                    else f"Attempt {target.year} {target.vehicle}  /  {target.speed_mph:.1f} mph"
+                )
+                self.action_button(page, action, self.start_record_attempt, True)
             else:
                 tk.Label(page, text="This turn's record session is complete. End the turn to begin another.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w")
+        else:
+            tk.Label(
+                page,
+                text="An official record target will appear when a rival sets a faster mark.",
+                bg=INK,
+                fg=MUTED,
+                font=(FONT, 11),
+            ).pack(anchor="w", pady=(10, 0))
 
     def render_test_facility(self):
         page = self.scroll_area()
@@ -1240,13 +1288,9 @@ class BonnevilleApp(tk.Tk):
         if self.campaign.record_attempt is not None:
             self.resume_record_attempt()
             return
-        target = next_historical_target(
-            self.campaign.current_year,
-            self.campaign.completed_historical_record_ids,
-            self.campaign.current_day_of_year,
-        )
+        target = record_chase_target(self.campaign)
         if not target:
-            messagebox.showinfo("Campaign records", "All historical campaign goals have been completed.", parent=self)
+            messagebox.showinfo("Campaign records", "No official record is available to challenge yet.", parent=self)
             return
         if not self.campaign.garage.vehicles:
             messagebox.showinfo("Garage required", "Build a garage vehicle before attempting a historical record.", parent=self)
@@ -1286,10 +1330,7 @@ class BonnevilleApp(tk.Tk):
             ),
             None,
         )
-        target = next(
-            (item for item in HISTORICAL_TARGETS if item.record_id == attempt.target_id),
-            None,
-        )
+        target = record_attempt_target(self.campaign, attempt)
         if entry is None or track is None or target is None:
             messagebox.showerror(
                 "Record attempt unavailable",
@@ -1355,24 +1396,15 @@ class BonnevilleApp(tk.Tk):
                 )
                 return
             if record_target is None and active_attempt is not None:
-                record_target = next(
-                    (
-                        target
-                        for target in HISTORICAL_TARGETS
-                        if target.record_id == active_attempt.target_id
-                    ),
-                    None,
+                record_target = record_attempt_target(
+                    self.campaign, active_attempt
                 )
             if record_target is None:
-                record_target = next_historical_target(
-                    self.campaign.current_year,
-                    self.campaign.completed_historical_record_ids,
-                    self.campaign.current_day_of_year,
-                )
+                record_target = record_chase_target(self.campaign)
             if record_target is None:
                 messagebox.showinfo(
                     "Campaign records",
-                    "All historical campaign goals have been completed.",
+                    "No rival has set a faster record to target yet.",
                     parent=self,
                 )
                 return
@@ -1387,11 +1419,7 @@ class BonnevilleApp(tk.Tk):
                     )
                     return
         else:
-            record_target = next_historical_target(
-                self.campaign.current_year,
-                self.campaign.completed_historical_record_ids,
-                self.campaign.current_day_of_year,
-            )
+            record_target = record_chase_target(self.campaign)
         if session_runs_remaining(self.campaign, record=record_attempt) <= 0:
             messagebox.showerror(
                 "Session full",
@@ -1433,6 +1461,9 @@ class BonnevilleApp(tk.Tk):
                 track_name=track.name,
                 started_year=self.campaign.current_year,
                 required_runs=required_record_runs(self.campaign.current_year),
+                target_year=record_target.year,
+                target_vehicle=record_target.vehicle,
+                target_speed_mph=record_target.speed_mph,
             )
             self.campaign.record_attempt = active_attempt
         result = run_simulation(
@@ -1480,10 +1511,26 @@ class BonnevilleApp(tk.Tk):
                 )
                 if record_attempt_completed:
                     self.campaign.record_attempt = None
-                    if target_completed(record_target, record_average_mph):
+                    target_beaten = (
+                        record_average_mph > record_target.speed_mph
+                        if record_target.record_id == TEAM_RECORD_TARGET_ID
+                        else target_completed(record_target, record_average_mph)
+                    )
+                    if target_beaten and record_target.record_id == TEAM_RECORD_TARGET_ID:
+                        self.last_record_message = (
+                            f"Official average: {record_average_mph:.1f} mph. "
+                            "Your team record has been extended."
+                        )
+                    elif target_beaten:
                         self.last_record_message = (
                             f"Official average: {record_average_mph:.1f} mph. "
                             f"{record_target.year} {record_target.vehicle} benchmark beaten."
+                        )
+                    elif record_target.record_id == TEAM_RECORD_TARGET_ID:
+                        self.last_record_message = (
+                            f"Official average: {record_average_mph:.1f} mph. "
+                            f"Your team record remains {record_target.speed_mph:.1f} mph; "
+                            "the attempt did not extend it."
                         )
                     else:
                         self.last_record_message = (
@@ -1562,11 +1609,7 @@ class BonnevilleApp(tk.Tk):
         report_text(report.run_status, LIME if report.completed else ACCENT, (FONT, 10, "bold"))
         report_text(self.last_run_note, MUTED)
         if not self.last_run_is_sandbox and report.completed and self.last_result is not None:
-            chase_target = next_historical_target(
-                self.campaign.current_year,
-                self.campaign.completed_historical_record_ids,
-                self.campaign.current_day_of_year,
-            )
+            chase_target = record_chase_target(self.campaign)
             if chase_target is not None:
                 gap = chase_target.speed_mph - self.last_result.measured_mile_speed_mph
                 report_text(
@@ -1711,19 +1754,11 @@ class BonnevilleApp(tk.Tk):
             self.action_button(page, "PREPARE NEXT TEST", lambda: self.show_page("Test Runs"))
             if self.last_run_was_record_attempt:
                 self._offer_another_record_attempt(page)
-            elif report.completed and self.campaign.garage.vehicles and next_historical_target(
-                self.campaign.current_year,
-                self.campaign.completed_historical_record_ids,
-                self.campaign.current_day_of_year,
-            ):
+            elif report.completed and self.campaign.garage.vehicles and record_chase_target(self.campaign):
                 self.action_button(page, "PLAN RECORD ATTEMPT", self.start_record_attempt)
 
     def _offer_another_record_attempt(self, page):
-        if next_historical_target(
-            self.campaign.current_year,
-            self.campaign.completed_historical_record_ids,
-            self.campaign.current_day_of_year,
-        ) is None:
+        if record_chase_target(self.campaign) is None:
             return
         remaining = session_runs_remaining(self.campaign, record=True)
         if remaining >= required_record_runs(self.campaign.current_year):
@@ -1793,17 +1828,23 @@ class BonnevilleApp(tk.Tk):
             self._trackside_ratio_control(page, entry, index, ratio)
 
         self.section(page, "Tyres")
-        if entry.tyre_grip_factor is None:
+        if (
+            entry.tyre_grip_factor is None
+            and self.campaign.research.has_tyre_technology("pneumatic_racing_tyres")
+        ):
             self.action_button(
                 page,
-                f"FIT TRACKSIDE TYRES (+0.03 GRIP) / GBP {TRACKSIDE_ADJUSTMENT_COST_GBP:.0f}",
+                f"FIT PNEUMATIC RACING TYRES (+0.03 GRIP) / GBP {TRACKSIDE_ADJUSTMENT_COST_GBP:.0f}",
                 self.fit_trackside_tyres,
             )
         else:
             tk.Label(page, text=f"Trackside tyre set fitted  /  Grip {vehicle.tyre_grip_factor:.2f}", bg=INK, fg=MUTED, font=(FONT, 10)).pack(anchor="w")
 
         self.section(page, "Brakes")
-        for brakes in available_brakes(self.campaign.current_year):
+        for brakes in available_brakes(
+            self.campaign.current_year,
+            self.campaign.research.brake_technology,
+        ):
             if brakes.name == entry.brakes_name:
                 continue
             self.action_button(

@@ -160,10 +160,22 @@ BRAKE_CATALOG = (
     CARBON_BRAKES,
 )
 BRAKE_BY_NAME = {brakes.name: brakes for brakes in BRAKE_CATALOG}
+BRAKE_RESEARCH_UNLOCKS = {
+    "mechanical_drum_brakes": "Early mechanical drum brakes",
+}
 
 
-def available_brakes(current_year=None):
-    """Return brake systems historically available in the campaign year."""
+def available_brakes(current_year=None, researched_technologies=()):
+    """Return historically available or researched brake systems."""
     if current_year is None:
         return BRAKE_CATALOG
-    return tuple(brake for brake in BRAKE_CATALOG if brake.introduced_year <= current_year)
+    researched_brakes = {
+        BRAKE_RESEARCH_UNLOCKS[technology_id]
+        for technology_id in researched_technologies
+        if technology_id in BRAKE_RESEARCH_UNLOCKS
+    }
+    return tuple(
+        brake
+        for brake in BRAKE_CATALOG
+        if brake.introduced_year <= current_year or brake.name in researched_brakes
+    )

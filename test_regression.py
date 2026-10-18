@@ -174,6 +174,67 @@ class TestSessionTests(unittest.TestCase):
 
 
 class RecordChaseTests(unittest.TestCase):
+    def test_team_record_becomes_a_target_to_extend(self):
+        from management import record_chase_target
+
+        campaign = CampaignState(current_year=1899, current_day_of_year=365)
+        campaign.official_record_mph = 70.0
+        target = record_chase_target(campaign)
+        self.assertEqual(target.record_id, "team_record")
+        self.assertEqual(target.speed_mph, 70.0)
+        self.assertIn("beyond 70.0 mph", target.milestone)
+
+    def test_team_can_extend_its_official_record(self):
+        campaign = CampaignState(current_year=1899, current_day_of_year=365)
+        campaign.official_record_mph = 70.0
+
+        complete_run(campaign, 0.0, 70.1, is_record_attempt=True)
+
+        self.assertEqual(campaign.official_record_mph, 70.1)
+        self.assertTrue(
+            any(
+                "extends its record to 70.10 mph" in headline
+                for headline in campaign.world.headlines
+            )
+        )
+
+    def test_saved_team_record_attempt_keeps_its_original_benchmark(self):
+        from management import (
+            CampaignRecordAttempt,
+            record_attempt_target,
+        )
+
+        campaign = CampaignState(current_year=1900)
+        campaign.official_record_mph = 75.0
+        attempt = CampaignRecordAttempt(
+            target_id="team_record",
+            vehicle_name="Record Chaser",
+            track_name="Public Roads",
+            started_year=1899,
+            required_runs=2,
+            target_year=1899,
+            target_vehicle="Bonneville Team official record",
+            target_speed_mph=70.0,
+        )
+
+        target = record_attempt_target(campaign, attempt)
+
+        self.assertEqual(target.speed_mph, 70.0)
+        self.assertEqual(target.year, 1899)
+
+    def test_rival_record_becomes_chase_target_once_faster(self):
+        from campaign_world import advance_world
+        from management import record_chase_target
+
+        campaign = CampaignState(current_year=1899, current_day_of_year=365)
+        campaign.official_record_mph = 60.0
+        advance_world(campaign)
+
+        self.assertEqual(
+            record_chase_target(campaign).record_id,
+            "jamais_contente_1899",
+        )
+
     def test_first_upgraded_car_can_reach_the_1899_standing_record(self):
         from historical_records import current_world_record
         from simulation import run_simulation
@@ -244,7 +305,7 @@ class RecordChaseTests(unittest.TestCase):
             record_gap_headline(target, target.speed_mph - 12.0), "12.0 mph short"
         )
         self.assertIn("clear", record_gap_headline(target, target.speed_mph + 3.0))
-        self.assertEqual(record_gap_headline(None, 500.0), "All records beaten")
+        self.assertEqual(record_gap_headline(None, 500.0), "No rival record to chase")
 
 
 class VehicleNamingTests(unittest.TestCase):
@@ -983,6 +1044,9 @@ class TracksideServiceTests(unittest.TestCase):
         original = build_vehicle_from_garage_entry(entry)
 
         adjust_vehicle_ratio_trackside(campaign, entry, None, -0.1)
+        with self.assertRaisesRegex(ValueError, "must be researched first"):
+            fit_trackside_tyres(campaign, entry)
+        campaign.research.tyre_technology.append("pneumatic_racing_tyres")
         fit_trackside_tyres(campaign, entry)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1011,6 +1075,21 @@ class TracksideServiceTests(unittest.TestCase):
 
         self.assertEqual(entry.brakes_name, "Hydraulic disc brakes")
         self.assertEqual(campaign.team.cash, starting_cash - 5.0)
+
+    def test_researched_early_brakes_can_be_fitted_trackside(self):
+        campaign = CampaignState(current_year=1895)
+        entry = self._garage_entry()
+        campaign.garage.vehicles.append(entry)
+        campaign.research.brake_technology.append("mechanical_drum_brakes")
+
+        fit_trackside_brakes(
+            campaign,
+            entry,
+            "Early mechanical drum brakes",
+            current_year=campaign.current_year,
+        )
+
+        self.assertEqual(entry.brakes_name, "Early mechanical drum brakes")
 
     def test_mechanic_suggests_lengthening_final_drive_on_rev_limiter(self):
         vehicle = AVAILABLE_CARS["1"]()
@@ -1541,6 +1620,13 @@ class HistoricalChallengeRegressionTests(unittest.TestCase):
             [brake.name for brake in available_brakes(1895)],
             ["Wooden block brakes"],
         )
+        self.assertEqual(
+            [
+                brake.name
+                for brake in available_brakes(1895, ("mechanical_drum_brakes",))
+            ],
+            ["Wooden block brakes", "Early mechanical drum brakes"],
+        )
         self.assertEqual(PIONEER_SINGLE_CYLINDER.power_hp, 30.0)
         self.assertLess(PIONEER_SINGLE_CYLINDER.reliability, 0.5)
 
@@ -1551,6 +1637,42 @@ class HistoricalChallengeRegressionTests(unittest.TestCase):
 
 
 class CampaignProgressionRegressionTests(unittest.TestCase):
+    def test_end_turn_returns_to_dashboard_from_any_page(self):
+        from ui.app import BonnevilleApp
+
+        app = SimpleNamespace(
+            campaign=CampaignState(),
+            page="Trackside Modifications",
+            advance_campaign_turn=Mock(),
+            show_page=Mock(),
+        )
+
+        with (
+            patch("ui.app.messagebox.askyesno", return_value=True),
+            patch("ui.app.save_campaign"),
+        ):
+            BonnevilleApp.end_turn(app)
+
+        app.advance_campaign_turn.assert_called_once_with()
+        app.show_page.assert_called_once_with("Dashboard")
+
+    def test_news_reports_close_rival_and_future_capable_challenger(self):
+        from campaign_world import advance_world
+
+        close_rival = CampaignState(current_year=1899, current_day_of_year=365)
+        close_rival.official_record_mph = 70.0
+        advance_world(close_rival)
+        self.assertTrue(
+            any("CHALLENGE WATCH" in item for item in close_rival.world.headlines)
+        )
+
+        future_rival = CampaignState(current_year=1895)
+        future_rival.official_record_mph = 38.0
+        advance_world(future_rival)
+        self.assertTrue(
+            any("DEVELOPMENT WATCH" in item for item in future_rival.world.headlines)
+        )
+
     def test_rivals_progress_during_research_and_survive_save_load(self):
         from management import standing_world_record, start_engineering_project
 

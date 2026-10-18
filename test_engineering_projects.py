@@ -59,6 +59,10 @@ class EngineeringProjectTests(unittest.TestCase):
         self.assertTrue(
             campaign.research.has_aerodynamics_technology("wind_deflector")
         )
+        self.assertIn(
+            "RESEARCH COMPLETE: Wind Deflector is now available to the team.",
+            campaign.world.headlines,
+        )
         self.assertEqual(campaign.available_engineers, 1)
         self.assertEqual(campaign.engineering_projects, [])
 

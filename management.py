@@ -32,6 +32,7 @@ from research import (
     CHASSIS_TECHNOLOGY_BY_ID,
     ENGINE_TECHNOLOGY_BY_ID,
     GEARBOX_TECHNOLOGY_BY_ID,
+    TECHNOLOGY_NAME_BY_ID,
     TYRE_TECHNOLOGY_BY_ID,
 )
 from sponsors import (
@@ -227,6 +228,21 @@ class CampaignRecordAttempt:
     started_year: int
     required_runs: int
     speeds_mph: list[float] = field(default_factory=list)
+    target_year: int | None = None
+    target_vehicle: str = ""
+    target_speed_mph: float | None = None
+
+
+TEAM_RECORD_TARGET_ID = "team_record"
+
+
+@dataclass(frozen=True)
+class CampaignRecordTarget:
+    record_id: str
+    year: int
+    vehicle: str
+    speed_mph: float
+    milestone: str
 
 
 @dataclass
@@ -441,8 +457,15 @@ def complete_run(
             campaign.official_record_mph, record_speed_mph
         )
         if previous_record is None or record_speed_mph > previous_record[0]:
+            record_headline = (
+                f"WORLD RECORD: {campaign.team.name} extends its record to "
+                f"{record_speed_mph:.2f} mph."
+                if previous_record and previous_record[1] == campaign.team.name
+                else f"WORLD RECORD: {campaign.team.name} takes the record at "
+                f"{record_speed_mph:.2f} mph."
+            )
             campaign.world.headlines.append(
-                f"WORLD RECORD: {campaign.team.name} takes the record at {record_speed_mph:.2f} mph."
+                record_headline
             )
             del campaign.world.headlines[:-8]
         target = next_historical_target(
@@ -493,6 +516,58 @@ def standing_world_record(campaign):
     if historical is None:
         return None
     return historical.speed_mph, f"{historical.driver} Team", historical.year
+
+
+def record_chase_target(campaign):
+    """Return the rival mark to beat, or the team's own mark to extend."""
+    record = standing_world_record(campaign)
+    if record is None:
+        return None
+    if record[1] == campaign.team.name:
+        return CampaignRecordTarget(
+            record_id=TEAM_RECORD_TARGET_ID,
+            year=record[2],
+            vehicle=f"{campaign.team.name} official record",
+            speed_mph=record[0],
+            milestone=f"Improve the team's official mark beyond {record[0]:.1f} mph.",
+        )
+    return next(
+        (
+            target
+            for target in HISTORICAL_TARGETS
+            if target.year == record[2] and target.speed_mph == record[0]
+        ),
+        None,
+    )
+
+
+def record_attempt_target(campaign, attempt):
+    """Resolve a saved attempt's original target, including a team record."""
+    historical_target = next(
+        (target for target in HISTORICAL_TARGETS if target.record_id == attempt.target_id),
+        None,
+    )
+    if historical_target is not None:
+        return historical_target
+    if attempt.target_id != TEAM_RECORD_TARGET_ID:
+        return None
+    target_speed = attempt.target_speed_mph
+    if target_speed is None:
+        current_target = record_chase_target(campaign)
+        return (
+            current_target
+            if current_target and current_target.record_id == TEAM_RECORD_TARGET_ID
+            else None
+        )
+    target_year = attempt.target_year or attempt.started_year
+    target_vehicle = attempt.target_vehicle or f"{campaign.team.name} official record"
+    return CampaignRecordTarget(
+        record_id=TEAM_RECORD_TARGET_ID,
+        year=target_year,
+        vehicle=target_vehicle,
+        speed_mph=target_speed,
+        milestone=f"Improve the team's official mark beyond {target_speed:.1f} mph.",
+    )
 
 
 def issue_sponsor_objective(campaign, sponsor_id):
@@ -626,6 +701,11 @@ def advance_turn(campaign, days=None):
             if project.technology_id not in completed_projects
         ]
     advance_world(campaign)
+    for technology_id in completed_projects:
+        campaign.world.headlines.append(
+            f"RESEARCH COMPLETE: {TECHNOLOGY_NAME_BY_ID[technology_id]} is now available to the team."
+        )
+    del campaign.world.headlines[:-8]
     _expire_sponsor_objectives(campaign)
     return tuple(completed_projects)
 
@@ -867,8 +947,10 @@ def apply_gear_ratios_trackside(campaign, garage_entry, gears, final_drive):
 
 
 def fit_trackside_tyres(campaign, garage_entry):
-    """Fit a modestly higher-grip tyre set without advancing campaign time."""
+    """Fit researched pneumatic racing tyres without advancing campaign time."""
     _require_active_garage_vehicle(campaign, garage_entry)
+    if not campaign.research.has_tyre_technology("pneumatic_racing_tyres"):
+        raise ValueError("Pneumatic Racing Tyres must be researched first")
     if garage_entry.tyre_grip_factor is not None:
         raise ValueError("this vehicle already has its trackside tyre set")
     current_grip = CHASSIS_BY_ID[garage_entry.chassis_id].tyre_grip_factor
@@ -886,7 +968,9 @@ def fit_trackside_brakes(campaign, garage_entry, brakes_name, current_year):
     _require_active_garage_vehicle(campaign, garage_entry)
     if not any(
         brakes.name == brakes_name
-        for brakes in available_brakes(current_year)
+        for brakes in available_brakes(
+            current_year, campaign.research.brake_technology
+        )
     ):
         raise ValueError("brake system is not available in the current era")
     if garage_entry.brakes_name == brakes_name:
