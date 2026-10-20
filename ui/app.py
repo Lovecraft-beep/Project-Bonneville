@@ -42,10 +42,20 @@ from historical_records import (
 from management import (
     CampaignRecordAttempt,
     DEVELOPMENT_PROGRAMS,
+    ENGINEER_HIRE_COST_GBP,
+    ENGINEER_WAGE_GBP,
+    MECHANIC_HIRE_COST_GBP,
+    MECHANIC_WAGE_GBP,
+    SPECIALIST_HIRE_COST_GBP,
+    SPECIALIST_WAGE_GBP,
+    EXPERIENCED_MECHANIC_HIRE_COST_GBP,
+    EXPERIENCED_MECHANIC_WAGE_GBP,
+    INAUGURAL_RECORD_TARGET_ID,
     TEAM_RECORD_TARGET_ID,
     advance_turn,
     adjust_vehicle_ratio_trackside,
     apply_gear_ratios_trackside,
+    available_engineer_specialties,
     build_vehicle,
     calculate_run_cost,
     calculate_session_run_cost,
@@ -53,11 +63,15 @@ from management import (
     complete_failed_run,
     complete_run,
     development_failure_risk_multiplier,
+    dismiss_engineer,
+    dismiss_mechanic,
     engineering_project_terms,
     fit_trackside_tyres,
     fit_trackside_brakes,
     hire_engineer,
     hire_mechanic,
+    hire_specialist_engineer,
+    hire_experienced_mechanic,
     lapse_record_attempt_if_out_of_runs,
     load_campaign,
     MAX_RECORD_RUNS_PER_SESSION,
@@ -79,8 +93,9 @@ from management import (
     start_engineering_project,
     TRACKSIDE_ADJUSTMENT_COST_GBP,
     upgrade_workshop,
+    vehicle_construction_complexity,
 )
-from records import create_record, load_records, save_record
+from records import create_record, load_records, save_record, vehicle_history
 from reliability import resolve_run_failure
 from research import (
     AERODYNAMICS_TECHNOLOGY_TREE,
@@ -93,7 +108,7 @@ from research import (
     aerodynamics_effects,
 )
 from simulation import run_simulation
-from sponsors import RUNS_OBJECTIVE, SPONSOR_BY_ID, SPONSOR_CATALOG, SPONSOR_OBJECTIVE_DEADLINE_TURNS, available_sponsors
+from sponsors import DEVELOPMENT_OBJECTIVE, SPONSOR_BY_ID, SPONSOR_CATALOG, SPONSOR_OBJECTIVE_DEADLINE_TURNS, available_sponsors
 from tracks import AVAILABLE_TRACKS, available_tracks
 from vehicle import Vehicle
 from vehicle_designer import build_vehicle_from_garage_entry
@@ -115,6 +130,8 @@ def record_gap_headline(target, best_speed_mph):
     """Summarise the team's gap to a rival's standing record, if any."""
     if target is None:
         return "No rival record to chase"
+    if target.record_id == INAUGURAL_RECORD_TARGET_ID:
+        return "Set inaugural record"
     gap = target.speed_mph - best_speed_mph
     if gap > 0:
         return f"{gap:.1f} mph short"
@@ -401,7 +418,8 @@ class BonnevilleApp(tk.Tk):
             (
                 "Gap to target",
                 record_gap_headline(target, best),
-                f"{target.year} {target.vehicle} / {target.speed_mph:.1f} mph" if target else "No rival has set a faster mark",
+                target.milestone if target and target.record_id == INAUGURAL_RECORD_TARGET_ID
+                else f"{target.year} {target.vehicle} / {target.speed_mph:.1f} mph" if target else "No rival has set a faster mark",
             ),
         )
         chase_row = tk.Frame(page, bg=INK)
@@ -412,11 +430,21 @@ class BonnevilleApp(tk.Tk):
         values = (
             ("Available funds", f"GBP {self.campaign.team.cash:,.0f}", f"{self.campaign.team.reputation:.1f} reputation"),
             ("Engineering team", f"{self.campaign.available_engineers} available", f"{self.campaign.allocated_engineers} allocated / {self.campaign.team.engineers} engineers"),
-            ("Workshop", f"LEVEL {self.campaign.team.workshop_level}", f"{len(self.campaign.garage.vehicles)} vehicles in garage"),
+            ("Workshop", f"LEVEL {self.campaign.team.workshop_level}", f"{len(self.campaign.garage.vehicles)} active / {len(self.campaign.vehicle_construction)} under construction"),
         )
         for label, value, sub in values:
             self.card(metrics, label, value, sub).pack(side="left", fill="both", expand=True, padx=(0, 10))
         metrics.winfo_children()[-1].pack_configure(padx=0)
+        tk.Label(
+            page,
+            text=(
+                f"Payroll GBP {self.campaign.team.payroll_per_turn_gbp:,.0f}/turn  /  "
+                f"Net cash flow GBP {self.campaign.cash_flow_per_turn_gbp:+,.0f}/turn  /  "
+                f"Next-turn balance GBP {self.campaign.projected_next_turn_cash_gbp:,.0f}"
+            ),
+            bg=INK, fg=ACCENT if self.campaign.projected_next_turn_cash_gbp < 0 else MUTED,
+            font=(FONT, 10), wraplength=1000, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
 
         columns = tk.Frame(page, bg=INK)
         columns.pack(fill="x", pady=(10, 0))
@@ -444,8 +472,13 @@ class BonnevilleApp(tk.Tk):
         if target:
             gap = max(0.0, target.speed_mph - self.campaign.best_measured_mile_speed_mph)
             tk.Label(right, text=f"{target.year}  /  {target.vehicle}", bg=INK, fg=PAPER, font=(DISPLAY_FONT, 17, "bold"), wraplength=470, justify="left").pack(anchor="w")
-            tk.Label(right, text=f"{target.speed_mph:.1f} mph target  |  {gap:.1f} mph to go\n{target.milestone}", bg=INK, fg=MUTED, font=(FONT, 10), justify="left").pack(anchor="w", pady=8)
-            self.action_button(right, "Attempt historical record", self.start_record_attempt, True)
+            objective = (
+                target.milestone if target.record_id == INAUGURAL_RECORD_TARGET_ID
+                else f"{target.speed_mph:.1f} mph target  |  {gap:.1f} mph to go\n{target.milestone}"
+            )
+            tk.Label(right, text=objective, bg=INK, fg=MUTED, font=(FONT, 10), wraplength=470, justify="left").pack(anchor="w", pady=8)
+            action = "Set inaugural record" if target.record_id == INAUGURAL_RECORD_TARGET_ID else "Attempt official record"
+            self.action_button(right, action, self.start_record_attempt, True)
         else:
             tk.Label(right, text="No faster rival record has been set yet.", bg=INK, fg=LIME, font=(FONT, 13, "bold")).pack(anchor="w")
         self.section(page, "Sponsor demands")
@@ -665,7 +698,20 @@ class BonnevilleApp(tk.Tk):
             )
             return ()
         previous_record = standing_world_record(self.campaign)
+        building_names = {
+            project.vehicle.vehicle_name for project in self.campaign.vehicle_construction
+        }
         completed = advance_turn(self.campaign, days=days)
+        completed_cars = [
+            entry.vehicle_name for entry in self.campaign.garage.vehicles
+            if entry.vehicle_name in building_names
+        ]
+        if completed_cars:
+            messagebox.showinfo(
+                "Construction complete",
+                f"Ready in the Garage: {', '.join(completed_cars)}",
+                parent=self,
+            )
         record = standing_world_record(self.campaign)
         if record and record[1] != self.campaign.team.name and (
             previous_record is None or record[0] > previous_record[0]
@@ -686,6 +732,13 @@ class BonnevilleApp(tk.Tk):
                 f"{names} withdrew after the team missed its target. Their income and reliability support are gone.",
                 parent=self,
             )
+        if self.campaign.team.cash < 0:
+            messagebox.showwarning(
+                "Cash deficit",
+                f"Payroll has left a GBP {-self.campaign.team.cash:,.0f} cash deficit. "
+                "Reduce staffing or secure sponsor funding before new spending.",
+                parent=self,
+            )
         return completed
 
     def end_turn(self):
@@ -694,7 +747,11 @@ class BonnevilleApp(tk.Tk):
             return
         if not messagebox.askyesno(
             "End turn",
-            f"End {self.campaign.current_season} {self.campaign.current_year}? Sponsor income is paid, engineering projects progress, rivals make their scheduled attempts, and the test session closes.",
+            f"End {self.campaign.current_season} {self.campaign.current_year}?\n\n"
+            f"Sponsor income: GBP {self.campaign.sponsorship.income_per_turn_gbp:,.0f}\n"
+            f"Staff wages: GBP {self.campaign.team.payroll_per_turn_gbp:,.0f}\n"
+            f"Projected balance: GBP {self.campaign.projected_next_turn_cash_gbp:,.0f}\n\n"
+            "Research and vehicle construction progress, rivals make their scheduled attempts, and the test session closes.",
             parent=self,
         ):
             return
@@ -709,9 +766,34 @@ class BonnevilleApp(tk.Tk):
             self.action_button(page, "+  DESIGN NEW VEHICLE", self.start_vehicle_builder, True)
         else:
             tk.Label(page, text="An official record attempt is active. New designs are unavailable until its return run is complete.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w", pady=(0, 10))
+        if self.campaign.vehicle_construction:
+            self.section(page, "Under construction")
+            for project in self.campaign.vehicle_construction:
+                row = tk.Frame(page, bg=PANEL, padx=16, pady=14)
+                row.pack(fill="x", pady=4)
+                tk.Label(
+                    row,
+                    text=project.vehicle.vehicle_name,
+                    bg=PANEL, fg=PAPER, font=(DISPLAY_FONT, 17, "bold"),
+                ).pack(anchor="w")
+                tk.Label(
+                    row,
+                    text=(
+                        f"Complexity {project.complexity}/5  /  "
+                        f"{project.turns_total - project.turns_remaining}/{project.turns_total} turns complete"
+                        f"  /  {project.turns_remaining} remaining"
+                    ),
+                    bg=PANEL, fg=LIME, font=(FONT, 10),
+                    wraplength=980, justify="left",
+                ).pack(anchor="w", pady=(4, 0))
         if not self.campaign.garage.vehicles:
-            self.section(page, "Empty garage")
-            tk.Label(page, text="Build your first car to unlock campaign test runs.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w")
+            self.section(page, "No active vehicles")
+            empty_text = (
+                "Awaiting construction completion."
+                if self.campaign.vehicle_construction
+                else "No vehicles in service."
+            )
+            tk.Label(page, text=empty_text, bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w")
         else:
             self.section(page, f"{len(self.campaign.garage.vehicles)} vehicles")
             for entry in self.campaign.garage.vehicles:
@@ -743,6 +825,8 @@ class BonnevilleApp(tk.Tk):
             return
 
         self.section(page, f"{len(retired)} retired designs")
+        run_history = load_records()
+        world_record = standing_world_record(self.campaign)
         for entry in retired:
             vehicle = build_vehicle_from_garage_entry(entry)
             row = tk.Frame(page, bg=PANEL, padx=16, pady=14)
@@ -767,6 +851,41 @@ class BonnevilleApp(tk.Tk):
                 wraplength=980,
                 justify="left",
             ).pack(anchor="w", pady=(4, 0))
+
+            history = vehicle_history(run_history, self.campaign.campaign_id, entry.vehicle_name)
+            peak = f"{history.peak_speed_mph:.1f} mph" if history.peak_speed_mph is not None else "No recorded runs"
+            measured = f"{history.best_measured_mile_mph:.1f} mph" if history.best_measured_mile_mph is not None else "Not recorded"
+            official = f"{history.official_best_mph:.2f} mph" if history.official_best_mph is not None else "Not recorded"
+            tk.Label(
+                row,
+                text=f"Peak speed: {peak}  /  Best measured mile: {measured}\nBest official average: {official}",
+                bg=PANEL, fg=LIME, font=(FONT, 10), wraplength=700, justify="left",
+            ).pack(anchor="w", pady=(8, 0))
+            if history.world_records:
+                current_holder = (
+                    world_record is not None
+                    and world_record[1] == self.campaign.team.name
+                    and self.campaign.official_record_vehicle_name == entry.vehicle_name
+                    and history.official_best_mph == world_record[0]
+                )
+                status = "Current world-record holder" if current_holder else "Former world-record holder"
+                record_text = f"{status}  /  World records set: {len(history.world_records)}"
+            else:
+                record_text = "No world-record achievements recorded"
+            tk.Label(
+                row, text=record_text, bg=PANEL, fg=PAPER,
+                font=(FONT, 10, "bold"), wraplength=700, justify="left",
+            ).pack(anchor="w", pady=(6, 0))
+            for achievement in history.world_records:
+                season = achievement.get("campaign_season", "")
+                year = achievement.get("campaign_year")
+                date_label = f"{season} {year}".strip() if year is not None else "Date not recorded"
+                tk.Label(
+                    row,
+                    text=(f"{date_label}: {achievement['official_average_mph']:.2f} mph"
+                          f"  /  {achievement.get('track_name', 'Venue not recorded')}"),
+                    bg=PANEL, fg=MUTED, font=(FONT, 9), wraplength=700, justify="left",
+                ).pack(anchor="w", pady=(3, 0))
 
     def open_garage_vehicle(self, entry):
         self.selected_vehicle = entry
@@ -844,19 +963,31 @@ class BonnevilleApp(tk.Tk):
         tk.Label(window, text=f"SELECT {component.upper()}", bg=INK, fg=PAPER, font=(DISPLAY_FONT, 20, "bold"), padx=22, pady=18).pack(anchor="w")
         container = tk.Frame(window, bg=INK)
         container.pack(fill="both", expand=True, padx=22, pady=(0, 20))
+        reuse_tune = tk.BooleanVar(value=False)
+        if component == "engine":
+            tk.Checkbutton(
+                container, text="Reuse saved model tune (unchecked: new stock engine)",
+                variable=reuse_tune, bg=INK, fg=PAPER, selectcolor=PANEL,
+                activebackground=INK, activeforeground=PAPER, font=(FONT, 10),
+                wraplength=540, justify="left",
+            ).pack(anchor="w", pady=(0, 10))
         for choice in choices:
             if component == "engine":
-                label = f"{choice.name}  /  {choice.power_hp:,.0f} hp  /  GBP {choice.purchase_cost_gbp:,.0f}"
+                stage = self._inherited_engine_tune_stage(choice.name)
+                label = f"{choice.name}  /  {choice.power_hp:,.0f} hp stock  /  GBP {choice.purchase_cost_gbp:,.0f}  /  Saved model tune: {stage}"
             elif component == "gearbox":
                 label = f"{choice.name}  /  {choice.gear_count} gears  /  GBP {choice.cost_gbp:,.0f}"
             else:
                 label = f"{choice.name}  /  {choice.max_braking_g:.2f} g  /  GBP {choice.cost_gbp:,.0f}"
-            self.action_button(container, label, lambda selected=choice: self.apply_component(entry, component, selected, window))
+            self.action_button(container, label, lambda selected=choice: self.apply_component(entry, component, selected, window, reuse_engine_tune=reuse_tune.get()))
 
-    def apply_component(self, entry, component, choice, window):
+    def apply_component(self, entry, component, choice, window, reuse_engine_tune=False):
         if component == "engine":
+            previous_stage = self._inherited_engine_tune_stage(entry.engine_name)
+            self.campaign.engine_tune_stages[entry.engine_name] = previous_stage
+            inherited_stage = self._inherited_engine_tune_stage(choice.name) if reuse_engine_tune else 0
             entry.engine_name = choice.name
-            entry.engine_tune_stage = self._inherited_engine_tune_stage(choice.name)
+            entry.engine_tune_stage = inherited_stage
             default_box = recommended_transmission(choice)
             if default_box.name == entry.gearbox_name:
                 gearbox = deepcopy(default_box)
@@ -884,6 +1015,9 @@ class BonnevilleApp(tk.Tk):
 
     def set_engine_tune(self, entry, stage):
         entry.engine_tune_stage = stage
+        self.campaign.engine_tune_stages[entry.engine_name] = max(
+            stage, self.campaign.engine_tune_stages.get(entry.engine_name, 0)
+        )
         save_campaign(self.campaign)
         self.open_garage_vehicle(entry)
 
@@ -1014,14 +1148,14 @@ class BonnevilleApp(tk.Tk):
 
     def _inherited_engine_tune_stage(self, engine_name):
         entries = self.campaign.garage.vehicles + self.campaign.garage.museum
-        return max(
-            (
+        return max([
+            self.campaign.engine_tune_stages.get(engine_name, 0),
+            *[
                 entry.engine_tune_stage
                 for entry in entries
                 if entry.engine_name == engine_name
-            ),
-            default=0,
-        )
+            ],
+        ])
 
     def _gearbox_with_saved_ratios(self, gearbox, exclude_entry=None):
         entries = (
@@ -1075,10 +1209,17 @@ class BonnevilleApp(tk.Tk):
             for item in choices:
                 self.action_button(page, f"{item.name}  /  {item.mass_kg:,.0f} kg  /  GBP {item.cost_gbp:,.0f}\n{item.description}", lambda value=item: self.builder_select("chassis", value))
         elif step == "engine":
+            reuse_tune = tk.BooleanVar(value=self.builder.get("reuse_engine_tune", False))
+            tk.Checkbutton(
+                page, text="Reuse saved model tune (unchecked: new stock engine)",
+                variable=reuse_tune, bg=INK, fg=PAPER, selectcolor=PANEL,
+                activebackground=INK, activeforeground=PAPER, font=(FONT, 10),
+                wraplength=700, justify="left",
+            ).pack(anchor="w", pady=(0, 10))
             for item in available_engines(self.campaign.research.engine_technology):
                 inherited_stage = self._inherited_engine_tune_stage(item.name)
-                stage_label = f"  /  Tune stage {inherited_stage} carried over" if inherited_stage else ""
-                self.action_button(page, f"{item.name}  /  {item.power_hp:,.0f} hp  /  GBP {item.purchase_cost_gbp:,.0f}  /  Reliability {item.reliability:.0%}{stage_label}", lambda value=item: self.builder_select("engine", value))
+                stage_label = f"  /  Saved model tune: {inherited_stage}"
+                self.action_button(page, f"{item.name}  /  {item.power_hp:,.0f} hp stock  /  GBP {item.purchase_cost_gbp:,.0f}  /  Reliability {item.reliability:.0%}{stage_label}", lambda value=item: self.builder_select("engine", value, reuse_engine_tune=reuse_tune.get()))
         elif step == "gearbox":
             engine = self.builder["engine"]
             choices = (DIRECT_DRIVE,) if engine.torque_curve_type in ("turbojet", "rocket") else TRANSMISSION_CATALOG
@@ -1136,14 +1277,15 @@ class BonnevilleApp(tk.Tk):
             )
         self.action_button(page, "CANCEL DESIGN", lambda: self.show_page("Garage"))
 
-    def builder_select(self, key, value):
+    def builder_select(self, key, value, reuse_engine_tune=False):
         if key == "name":
             self.confirm_vehicle_name(value)
             return
         if key == "engine":
             self.builder[key] = value
-            self.builder["engine_tune_stage"] = self._inherited_engine_tune_stage(
-                value.name
+            self.builder["reuse_engine_tune"] = reuse_engine_tune
+            self.builder["engine_tune_stage"] = (
+                self._inherited_engine_tune_stage(value.name) if reuse_engine_tune else 0
             )
         elif key == "gearbox":
             self.builder[key], self.builder["gearbox_inherited"] = (
@@ -1166,12 +1308,15 @@ class BonnevilleApp(tk.Tk):
             return
         existing_names = {
             entry.vehicle_name.casefold()
-            for entry in self.campaign.garage.vehicles + self.campaign.garage.museum
+            for entry in (
+                self.campaign.garage.vehicles + self.campaign.garage.museum
+                + [project.vehicle for project in self.campaign.vehicle_construction]
+            )
         }
         if name.casefold() in existing_names:
             messagebox.showerror(
                 "Vehicle name already used",
-                "Choose a name that is not already in the garage or museum.",
+                "Choose a name that is not already in the garage, museum, or under construction.",
                 parent=self,
             )
             return
@@ -1219,9 +1364,12 @@ class BonnevilleApp(tk.Tk):
             "Stock" if engine_tune_stage == 0 else f"Stage {engine_tune_stage}"
         )
         ratio_summary = " / ".join(f"{ratio:.2f}" for ratio in gearbox.gears)
+        complexity = vehicle_construction_complexity(entry)
         if not messagebox.askyesno(
             "Confirm construction",
-            f"Build {name} for GBP {cost:,.0f}?\n\n"
+            f"Start building {name} for GBP {cost:,.0f}?\n"
+            f"Complexity: {complexity}/5  /  Build time: {complexity} turn(s)\n"
+            "Paid now; available when construction completes.\n\n"
             f"Engine tune: {engine_tune_summary}\n"
             f"{gearbox.name} ratios: {ratio_summary}\n"
             f"Final drive: {gearbox.final_drive_ratio:.2f}\n\n"
@@ -1301,7 +1449,9 @@ class BonnevilleApp(tk.Tk):
             self.section(page, "Official record attempt")
             if session_runs_remaining(self.campaign, record=True) >= required_record_runs(self.campaign.current_year):
                 action = (
-                    f"EXTEND TEAM RECORD / {target.speed_mph:.1f} mph"
+                    "SET INAUGURAL RECORD"
+                    if target.record_id == INAUGURAL_RECORD_TARGET_ID
+                    else f"EXTEND TEAM RECORD / {target.speed_mph:.1f} mph"
                     if target.record_id == TEAM_RECORD_TARGET_ID
                     else f"Attempt {target.year} {target.vehicle}  /  {target.speed_mph:.1f} mph"
                 )
@@ -1380,7 +1530,7 @@ class BonnevilleApp(tk.Tk):
             messagebox.showinfo("Campaign records", "No official record is available to challenge yet.", parent=self)
             return
         if not self.campaign.garage.vehicles:
-            messagebox.showinfo("Garage required", "Build a garage vehicle before attempting a historical record.", parent=self)
+            messagebox.showinfo("Garage required", "Complete a garage vehicle before attempting an official record.", parent=self)
             return
         self.selected_vehicle = self.campaign.garage.vehicles[0]
         self._render_record_vehicle_choices(target)
@@ -1389,7 +1539,10 @@ class BonnevilleApp(tk.Tk):
         for child in self.body.winfo_children():
             child.destroy()
         page = self.scroll_area()
-        self.page_title(page, "Historical campaign", f"Record target / {target.year}", f"Beat {target.vehicle} at {target.speed_mph:.1f} mph. {target.milestone}")
+        if target.record_id == INAUGURAL_RECORD_TARGET_ID:
+            self.page_title(page, "Official record attempt", "Set inaugural record", target.milestone)
+        else:
+            self.page_title(page, "Official record attempt", f"Record target / {target.year}", f"Beat {target.vehicle} at {target.speed_mph:.1f} mph. {target.milestone}")
         for entry in self.campaign.garage.vehicles:
             self.action_button(page, entry.vehicle_name, lambda selected=entry: self.choose_record_track(selected, target))
 
@@ -1441,6 +1594,16 @@ class BonnevilleApp(tk.Tk):
             messagebox.showerror(
                 "Workshop repair required",
                 "Return to the Garage before starting another campaign test.",
+                parent=self,
+            )
+            return
+        if any(
+            project.vehicle.vehicle_name == entry.vehicle_name
+            for project in self.campaign.vehicle_construction
+        ):
+            messagebox.showerror(
+                "Vehicle under construction",
+                "This vehicle is not ready for a run yet.",
                 parent=self,
             )
             return
@@ -1575,6 +1738,7 @@ class BonnevilleApp(tk.Tk):
         self.last_record_message = None
         record_attempt_completed = False
         record_average_mph = None
+        world_record_set = False
         if outcome.failed:
             complete_failed_run(self.campaign, cost)
             self.last_run_note = f"ABORTED: {outcome.failure_type.name}. Failure probability {outcome.failure_probability:.1%}."
@@ -1592,12 +1756,17 @@ class BonnevilleApp(tk.Tk):
                     record_average_mph = average_record_speed(
                         active_attempt.speeds_mph
                     )
+                    previous_world_record = standing_world_record(self.campaign)
+                    world_record_set = record_average_mph > 0 and (
+                        previous_world_record is None or record_average_mph > previous_world_record[0]
+                    )
                 sponsor_messages = complete_run(
                     self.campaign,
                     cost,
                     result.measured_mile_speed_mph,
                     is_record_attempt=record_attempt_completed,
                     record_attempt_average_mph=record_average_mph,
+                    vehicle_name=entry.vehicle_name,
                 )
                 if record_attempt_completed:
                     self.campaign.record_attempt = None
@@ -1606,7 +1775,12 @@ class BonnevilleApp(tk.Tk):
                         if record_target.record_id == TEAM_RECORD_TARGET_ID
                         else target_completed(record_target, record_average_mph)
                     )
-                    if target_beaten and record_target.record_id == TEAM_RECORD_TARGET_ID:
+                    if target_beaten and record_target.record_id == INAUGURAL_RECORD_TARGET_ID:
+                        self.last_record_message = (
+                            f"Official average: {record_average_mph:.1f} mph. "
+                            "The inaugural land-speed record has been established."
+                        )
+                    elif target_beaten and record_target.record_id == TEAM_RECORD_TARGET_ID:
                         self.last_record_message = (
                             f"Official average: {record_average_mph:.1f} mph. "
                             "Your team record has been extended."
@@ -1615,6 +1789,10 @@ class BonnevilleApp(tk.Tk):
                         self.last_record_message = (
                             f"Official average: {record_average_mph:.1f} mph. "
                             f"{record_target.year} {record_target.vehicle} benchmark beaten."
+                        )
+                    elif record_target.record_id == INAUGURAL_RECORD_TARGET_ID:
+                        self.last_record_message = (
+                            "No inaugural record credited: a positive measured-mile speed is required."
                         )
                     elif record_target.record_id == TEAM_RECORD_TARGET_ID:
                         self.last_record_message = (
@@ -1640,7 +1818,11 @@ class BonnevilleApp(tk.Tk):
                 [f"Completed. Measured mile {result.measured_mile_speed_mph:.1f} mph; peak {result.peak_speed_mph:.1f} mph."]
                 + list(sponsor_messages or ())
             )
-            save_record(create_record(vehicle, track, result, self.campaign))
+            save_record(create_record(
+                vehicle, track, result, self.campaign,
+                official_average_mph=record_average_mph if record_attempt_completed else None,
+                world_record_set=world_record_set,
+            ))
         if lapse_record_attempt_if_out_of_runs(self.campaign):
             self.last_record_message = "Not enough record runs remain this turn to finish the attempt; it has lapsed."
             record_attempt = False
@@ -1700,7 +1882,9 @@ class BonnevilleApp(tk.Tk):
         report_text(self.last_run_note, MUTED)
         if not self.last_run_is_sandbox and report.completed and self.last_result is not None:
             chase_target = record_chase_target(self.campaign)
-            if chase_target is not None:
+            if chase_target is not None and chase_target.record_id == INAUGURAL_RECORD_TARGET_ID:
+                report_text(chase_target.milestone, LIME, (FONT, 12, "bold"))
+            elif chase_target is not None:
                 gap = chase_target.speed_mph - self.last_result.measured_mile_speed_mph
                 report_text(
                     f"Target: {chase_target.speed_mph:.1f} mph ({chase_target.year} {chase_target.vehicle}). "
@@ -2321,9 +2505,86 @@ class BonnevilleApp(tk.Tk):
         page = self.scroll_area()
         team = self.campaign.team
         self.page_title(page, "People & facilities", "Team management", f"{self.campaign.available_engineers} of {team.engineers} engineers available  /  {self.campaign.allocated_engineers} assigned to projects  /  {team.mechanics} mechanics  /  workshop level {team.workshop_level}")
-        self.section(page, "Staffing")
-        self.action_button(page, "Hire engineer  /  GBP 8,000", lambda: self.team_action(hire_engineer, "Engineer hired"))
-        self.action_button(page, "Hire mechanic  /  GBP 5,000", lambda: self.team_action(hire_mechanic, "Mechanic hired"))
+        self.section(page, "Seasonal finances")
+        tk.Label(
+            page,
+            text=(
+                f"Cash GBP {team.cash:,.0f}  /  Sponsor income GBP {self.campaign.sponsorship.income_per_turn_gbp:,.0f}/turn\n"
+                f"Payroll GBP {team.payroll_per_turn_gbp:,.0f}/turn  /  Net GBP {self.campaign.cash_flow_per_turn_gbp:+,.0f}/turn\n"
+                f"Projected next-turn balance GBP {self.campaign.projected_next_turn_cash_gbp:,.0f}"
+            ),
+            bg=INK, fg=ACCENT if self.campaign.projected_next_turn_cash_gbp < 0 else LIME,
+            font=(FONT, 11), wraplength=1000, justify="left",
+        ).pack(anchor="w", pady=(0, 12))
+        self.section(page, "Recruitment")
+        for label, cost, wage, action in (
+            ("Standard engineer", ENGINEER_HIRE_COST_GBP, ENGINEER_WAGE_GBP, hire_engineer),
+            ("Standard mechanic", MECHANIC_HIRE_COST_GBP, MECHANIC_WAGE_GBP, hire_mechanic),
+            ("Experienced mechanic", EXPERIENCED_MECHANIC_HIRE_COST_GBP, EXPERIENCED_MECHANIC_WAGE_GBP, hire_experienced_mechanic),
+        ):
+            self.action_button(
+                page, f"Hire {label} / GBP {cost:,.0f} + GBP {wage:,.0f}/turn",
+                lambda selected=action, name=label, fee=cost, salary=wage:
+                    self.hire_staff_action(selected, name, fee, salary),
+            )
+        tk.Label(
+            page, text="Experienced mechanic: double mechanical skill contribution; one provides the minor-repair coverage of two standard mechanics. Major failures still require the workshop.",
+            bg=INK, fg=MUTED, font=(FONT, 9), wraplength=1000, justify="left",
+        ).pack(anchor="w", pady=(3, 8))
+        specialty_labels = {
+            "Engine": "engine", "Aerodynamics": "aerodynamics", "Chassis": "chassis",
+            "Gearbox": "gearbox", "Tyres": "tyre", "Brakes": "brake",
+        }
+        specialty = tk.StringVar(value="Engine")
+        menu = tk.OptionMenu(page, specialty, *specialty_labels)
+        menu.configure(bg=PANEL, fg=PAPER, activebackground=PANEL_LIGHT,
+                       relief="flat", highlightthickness=0, font=(FONT, 10))
+        menu.pack(anchor="w", pady=(4, 0))
+        self.action_button(
+            page,
+            f"Hire specialist engineer / GBP {SPECIALIST_HIRE_COST_GBP:,.0f} + GBP {SPECIALIST_WAGE_GBP:,.0f}/turn",
+            lambda: self.hire_staff_action(
+                lambda campaign: hire_specialist_engineer(campaign, specialty_labels[specialty.get()]),
+                f"{specialty.get()} specialist", SPECIALIST_HIRE_COST_GBP, SPECIALIST_WAGE_GBP,
+            ),
+        )
+        tk.Label(
+            page, text="A matching specialist shortens one assigned research project by one turn (minimum one turn). Each specialist still occupies one required engineer slot.",
+            bg=INK, fg=MUTED, font=(FONT, 9), wraplength=1000, justify="left",
+        ).pack(anchor="w", pady=(3, 8))
+        self.section(page, "Retained staff")
+        ordinary_engineers = team.engineers - len(team.engineer_specialties)
+        ordinary_mechanics = team.mechanics - team.experienced_mechanics
+        tk.Label(
+            page,
+            text=(f"Standard engineers {ordinary_engineers} / GBP {ENGINEER_WAGE_GBP:,.0f} each per turn\n"
+                  f"Standard mechanics {ordinary_mechanics} / GBP {MECHANIC_WAGE_GBP:,.0f} each per turn\n"
+                  f"Experienced mechanics {team.experienced_mechanics} / GBP {EXPERIENCED_MECHANIC_WAGE_GBP:,.0f} each per turn"),
+            bg=INK, fg=MUTED, font=(FONT, 10), wraplength=1000, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+        if ordinary_engineers:
+            self.action_button(page, "Release standard engineer", lambda: self.release_staff_action(dismiss_engineer, "standard engineer"))
+        if ordinary_mechanics:
+            self.action_button(page, "Release standard mechanic", lambda: self.release_staff_action(dismiss_mechanic, "standard mechanic"))
+        if team.experienced_mechanics:
+            self.action_button(page, "Release experienced mechanic", lambda: self.release_staff_action(lambda campaign: dismiss_mechanic(campaign, experienced=True), "experienced mechanic"))
+        free_specialties = available_engineer_specialties(self.campaign)
+        for label, branch in specialty_labels.items():
+            count = team.engineer_specialties.count(branch)
+            if not count:
+                continue
+            free = free_specialties.count(branch)
+            tk.Label(
+                page, text=f"{label} specialists: {count} / {free} available / GBP {SPECIALIST_WAGE_GBP:,.0f} each per turn",
+                bg=INK, fg=MUTED, font=(FONT, 10), wraplength=1000,
+            ).pack(anchor="w", pady=3)
+            if free:
+                self.action_button(
+                    page, f"Release {label} specialist",
+                    lambda chosen=branch, name=label: self.release_staff_action(
+                        lambda campaign: dismiss_engineer(campaign, chosen), f"{name} specialist",
+                    ),
+                )
         cost = calculate_workshop_upgrade_cost(team)
         self.section(page, "Facilities")
         self.action_button(page, f"Upgrade workshop to level {team.workshop_level + 1}  /  GBP {cost:,.0f}", lambda: self.team_action(upgrade_workshop, "Workshop upgraded"))
@@ -2338,13 +2599,13 @@ class BonnevilleApp(tk.Tk):
                 tk.Label(page, text=f"WITHDRAWN  /  {sponsor.name}  /  will not return after a missed target", bg=INK, fg=ACCENT, font=(FONT, 9)).pack(anchor="w", pady=4)
                 continue
             available = sponsor in available_sponsors(team.reputation, active, departed)
-            if sponsor.objective_kind == RUNS_OBJECTIVE:
-                demand = f"demands {sponsor.objective_value:.0f} successful runs"
+            if sponsor.objective_kind == DEVELOPMENT_OBJECTIVE:
+                demand = f"rewards {sponsor.objective_value:.0f} completed research or vehicle build; no deadline"
             else:
-                demand = f"demands {sponsor.objective_value:.0%} of the world record"
+                demand = f"demands {sponsor.objective_value:.0%} of the world record every {SPONSOR_OBJECTIVE_DEADLINE_TURNS} turns"
             detail = (
                 f"{sponsor.name}  /  signing GBP {sponsor.signing_bonus_gbp:,.0f}  /  per turn GBP {sponsor.income_per_turn_gbp:,.0f}  /  "
-                f"reliability +{sponsor.reliability_bonus:.0%}  /  {demand} every {SPONSOR_OBJECTIVE_DEADLINE_TURNS} turns"
+                f"reliability +{sponsor.reliability_bonus:.0%}  /  {demand}"
             )
             if available:
                 self.action_button(page, detail, lambda selected=sponsor: self.sign_sponsor_action(selected), True)
@@ -2352,6 +2613,25 @@ class BonnevilleApp(tk.Tk):
                 tk.Label(page, text=f"LOCKED  /  {sponsor.name}  /  {sponsor.reputation_required:.1f} reputation required", bg=INK, fg=MUTED, font=(FONT, 9)).pack(anchor="w", pady=4)
         self.section(page, "Campaign controls")
         self.action_button(page, "RESET CAMPAIGN", self.confirm_reset)
+
+    def hire_staff_action(self, action, label, cost, wage):
+        projected = self.campaign.projected_next_turn_cash_gbp - cost - wage
+        if not messagebox.askyesno(
+            "Confirm recruitment",
+            f"Hire {label}?\n\nRecruitment: GBP {cost:,.0f}\n"
+            f"Wages: GBP {wage:,.0f} every turn, including idle turns\n"
+            f"New payroll: GBP {self.campaign.team.payroll_per_turn_gbp + wage:,.0f}/turn\n"
+            f"Projected next-turn balance after hiring: GBP {projected:,.0f}",
+            parent=self,
+        ):
+            return
+        self.team_action(action, f"{label} hired")
+
+    def release_staff_action(self, action, label):
+        if messagebox.askyesno(
+            "Release staff", f"Release this {label}? Recruitment costs are not refunded.", parent=self,
+        ):
+            self.team_action(action, f"{label} released")
 
     def team_action(self, action, success):
         try:
@@ -2366,9 +2646,14 @@ class BonnevilleApp(tk.Tk):
         try:
             objective = sign_sponsor(self.campaign, sponsor.sponsor_id)
             save_campaign(self.campaign)
+            terms = (
+                "An ongoing technical partnership: rewards follow completed research or vehicle builds, with no run quota or deadline."
+                if objective.turns_remaining is None
+                else "Miss the deadline and they withdraw for good."
+            )
             messagebox.showinfo(
                 "Sponsor signed",
-                f"{sponsor.name} is on board.\n\nFirst demand: {describe_sponsor_objective(self.campaign, objective)}.\n\nMiss the deadline and they withdraw for good.",
+                f"{sponsor.name} is on board.\n\nObjective: {describe_sponsor_objective(self.campaign, objective)}.\n\n{terms}",
                 parent=self,
             )
         except ValueError as exc:
@@ -2381,7 +2666,7 @@ class BonnevilleApp(tk.Tk):
             tk.Label(parent, text="No sponsors signed.", bg=INK, fg=MUTED, font=(FONT, 10)).pack(anchor="w", pady=3)
             return
         for objective in objectives:
-            urgent = objective.turns_remaining <= 1
+            urgent = objective.turns_remaining is not None and objective.turns_remaining <= 1
             tk.Label(
                 parent,
                 text=f"{SPONSOR_BY_ID[objective.sponsor_id].name.upper()}  /  {describe_sponsor_objective(self.campaign, objective)}",

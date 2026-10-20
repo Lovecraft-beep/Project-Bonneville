@@ -23,9 +23,13 @@ class HistoricalRecord:
     average_deceleration_g: float
     full_throttle_seconds: float
     measured_mile_speed_mph: float
+    official_average_mph: float | None = None
+    world_record_set: bool = False
+    campaign_year: int | None = None
+    campaign_season: str = ""
 
 
-def create_record(vehicle, track, result, campaign):
+def create_record(vehicle, track, result, campaign, official_average_mph=None, world_record_set=False):
     return HistoricalRecord(
         recorded_at=datetime.now().isoformat(timespec="seconds"),
         campaign_id=campaign.campaign_id,
@@ -40,6 +44,38 @@ def create_record(vehicle, track, result, campaign):
         average_deceleration_g=result.average_deceleration_g,
         full_throttle_seconds=result.full_throttle_seconds,
         measured_mile_speed_mph=result.measured_mile_speed_mph,
+        official_average_mph=official_average_mph,
+        world_record_set=world_record_set,
+        campaign_year=campaign.current_year,
+        campaign_season=campaign.current_season,
+    )
+
+
+@dataclass
+class VehicleHistory:
+    peak_speed_mph: float | None
+    best_measured_mile_mph: float | None
+    official_best_mph: float | None
+    world_records: list[dict]
+
+
+def vehicle_history(records, campaign_id, vehicle_name):
+    runs = [
+        record for record in records
+        if record.get("campaign_id") == campaign_id and record.get("car_name") == vehicle_name
+    ]
+    return VehicleHistory(
+        peak_speed_mph=max((record["peak_speed_mph"] for record in runs), default=None),
+        best_measured_mile_mph=max((record["measured_mile_speed_mph"] for record in runs), default=None),
+        official_best_mph=max(
+            (record["official_average_mph"] for record in runs
+             if record.get("official_average_mph") is not None and record["official_average_mph"] > 0),
+            default=None,
+        ),
+        world_records=[
+            record for record in runs
+            if record.get("world_record_set") and (record.get("official_average_mph") or 0) > 0
+        ],
     )
 
 

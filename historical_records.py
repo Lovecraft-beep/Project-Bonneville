@@ -92,6 +92,8 @@ def average_record_speed(speeds_mph):
 
 def target_completed(target, measured_mile_speed_mph):
     """Return whether a measured-mile run matches or beats a target."""
+    if getattr(target, "record_id", None) == "inaugural_record":
+        return measured_mile_speed_mph > 0
     return measured_mile_speed_mph >= target.speed_mph
 
 

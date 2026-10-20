@@ -5,6 +5,7 @@ from dataclasses import dataclass
 SPONSOR_OBJECTIVE_DEADLINE_TURNS = 3
 SPEED_OBJECTIVE = "speed"
 RUNS_OBJECTIVE = "runs"
+DEVELOPMENT_OBJECTIVE = "development"
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,6 @@ class Sponsor:
     signing_bonus_gbp: float = 0.0
     income_per_turn_gbp: float = 0.0
     reliability_bonus: float = 0.0
-    # Speed objectives are a fraction of the standing world record; runs objectives are a count.
     objective_kind: str = SPEED_OBJECTIVE
     objective_value: float = 0.8
     objective_reward_gbp: float = 5_000.0
@@ -38,8 +38,8 @@ SPONSOR_CATALOG = (
         "Lubricant partnership improves engine reliability.",
         signing_bonus_gbp=3_000.0,
         reliability_bonus=0.03,
-        objective_kind=RUNS_OBJECTIVE,
-        objective_value=3,
+        objective_kind=DEVELOPMENT_OBJECTIVE,
+        objective_value=1,
         objective_reward_gbp=3_000.0,
     ),
     Sponsor(
@@ -49,8 +49,8 @@ SPONSOR_CATALOG = (
         reputation_required=5.0,
         signing_bonus_gbp=2_000.0,
         reliability_bonus=0.04,
-        objective_kind=RUNS_OBJECTIVE,
-        objective_value=5,
+        objective_kind=DEVELOPMENT_OBJECTIVE,
+        objective_value=1,
         objective_reward_gbp=4_000.0,
     ),
     Sponsor(

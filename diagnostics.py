@@ -332,7 +332,16 @@ def create_engineering_report(
             )
             gap = target.speed_mph - assessed_speed
             benchmark = f"{target.year} {target.vehicle}: {target.speed_mph:.1f} mph"
-            if record_attempt_in_progress:
+            if getattr(target, "record_id", None) == "inaugural_record":
+                if record_attempt_in_progress:
+                    target_assessment = "Return pass required before the inaugural record can be credited."
+                elif assessed_speed <= 0:
+                    target_assessment = "No inaugural record credited: a positive measured-mile speed is required."
+                elif is_record_attempt:
+                    target_assessment = f"Inaugural official record established at {assessed_speed:.1f} mph."
+                else:
+                    target_assessment = "Test pace recorded. An official attempt can establish the inaugural record."
+            elif record_attempt_in_progress:
                 target_assessment = (
                     f"Outbound pass {result.measured_mile_speed_mph:.1f} mph; "
                     f"return pass required before assessing {benchmark}."

@@ -60,9 +60,50 @@ simulation starts. The campaign stores remaining funds, completed-run count,
 and the best measured-mile speed in `campaign_state.json`.
 
 Campaign management is represented by a `Team` with a name, cash balance,
-reputation, engineers, mechanics, and workshop level. These values are ready
-to support future hiring, sponsorship, workshop upgrades, and engineering
-constraints without coupling them to the physics simulation.
+reputation, engineers, mechanics, and workshop level. Staff draw wages every
+seasonal turn, including idle turns. The starting team (one standard engineer
+and two standard mechanics) costs GBP 450 per turn.
+
+| Staff | Recruitment | Wages Per Turn | Effect |
+| --- | --- | --- | --- |
+| Standard engineer | GBP 8,000 | GBP 250 | One engineer slot for research |
+| Specialist engineer | GBP 16,000 | GBP 650 | One slot; matching research finishes one turn sooner |
+| Standard mechanic | GBP 5,000 | GBP 100 | Standard reliability and repair contribution |
+| Experienced mechanic | GBP 10,000 | GBP 250 | Double mechanic skill contribution and minor-repair coverage |
+
+Specialists are hired for engines, aerodynamics, chassis, gearboxes, tyres, or
+brakes. Projects reserve their staff until completion. One matching specialist
+shortens a project by one turn, with a minimum duration of one turn; specialists
+working outside their branch provide headcount but no speed bonus. Benefits do
+not stack by assigning extra specialists to the same project.
+
+One experienced mechanic provides the minor-repair coverage of two standard
+mechanics, but an engineer is still required. Major failures still require the
+workshop. The usual reliability skill cap remains in effect.
+
+Team and Dashboard show payroll, net seasonal cash flow, and projected next-turn
+cash. Recruitment confirmation includes the new wages and post-hire forecast.
+Idle staff can be released without a recruitment refund; assigned engineers
+cannot be released, and at least one engineer must remain. Staff quality and
+project assignments are saved with the career.
+
+End Turn pays sponsor income and deducts the full wage bill. If cash falls below
+zero, the deficit remains visible and new spending is restricted by affordability;
+turns can still advance while the team reduces staffing or secures funding.
+
+### Sponsorship Objectives
+
+Castrol and Dunlop are ongoing technical partnerships rather than run quotas.
+Completing a research project or vehicle build earns their milestone reward
+automatically on End Turn, without a test run. Their next milestone starts from
+the new development total, so previously completed work and repeated tests do
+not earn extra payouts. There is no inactivity deadline or withdrawal for taking
+time between development projects. Existing saved run-quota contracts are
+converted to these development objectives on load.
+
+Speed-focused sponsors retain their timed measured-mile objectives and
+withdrawal rules. The Team screen and Dashboard distinguish ongoing technical
+partnerships from those timed commitments.
 
 Research is managed through multi-turn engineering projects. Starting a project
 spends its cost and reserves its required engineers; it advances on every
@@ -75,8 +116,8 @@ and current progress before a project is started.
 The campaign starts in Spring 1895 and uses four seasonal turns per year:
 Spring, Summer, Autumn, Winter, then Spring of the next year. Only **End turn**
 advances the season; research, management actions, and runs do not advance time.
-Each seasonal turn pays sponsor income, progresses engineering projects, updates
-rival attempts, and resets the test and record sessions. Seasons provide the
+Each seasonal turn pays sponsor income and staff wages, progresses research and vehicle
+construction, updates rival attempts, and resets the test and record sessions. Seasons provide the
 calendar foundation for future weather effects; weather is not yet simulated.
 
 Test runs now include named failure risks: `Misfire`, `Oil leak`, `Gear
@@ -184,6 +225,21 @@ the campaign. Reviewing a report spends no funds and advances no time.
 
 ## Historical Records
 
+Museum entries show each retired car's recorded peak speed, best measured mile,
+best completed official average, and world-record achievements with campaign
+season, year, and venue. Current/former holder status follows the live campaign
+standings, so it changes when a rival or another team car beats the mark. Run
+history is isolated by career and car name. Older run entries without official
+attempt metadata still contribute peak speeds, but are not guessed to be official
+records; unrun cars show that no results have been recorded.
+
+Before a standing record exists, the Dashboard and Test Runs screen offer
+**Set inaugural record**. A completed official attempt with a positive
+measured-mile speed establishes the first mark, even in 1895; practice runs do
+not count. Once established, the team can attempt to extend its own record
+without waiting for a rival. Normal vehicle availability and official pass-count
+rules still apply.
+
 Each simulation is saved to `historical_records.json`, which persists between
 sessions. A record stores the car, engine, gearbox, brakes, track, peak speed,
 average acceleration and deceleration, full-throttle time, and measured-mile
@@ -231,7 +287,35 @@ The current catalogue contains:
 
 Build custom cars from unlocked chassis, engines, transmissions, and historically
 available brakes in the Garage. The builder assigns a vehicle name automatically;
-garage vehicles can be tuned, upgraded, and selected for campaign test runs.
+construction is paid in full when ordered, but the car only enters the active
+Garage when its build is complete. The confirmation shows its complexity and
+build time; the Garage shows construction progress and turns remaining.
+
+Build complexity uses the most advanced fitted chassis, engine technology,
+brake introduction era, or aerodynamic technology, rather than the campaign year:
+
+| Component Era | Complexity | Build Time |
+| --- | --- | --- |
+| Pioneers | 1/5 | 1 turn |
+| Interwar | 2/5 | 2 turns |
+| Jet Age | 3/5 | 3 turns |
+| Professional | 4/5 | 4 turns |
+| Modern | 5/5 | 5 turns |
+
+Each **End turn** advances every construction project by one turn. Progress and
+the ordered specification are saved with the career; queued names are reserved.
+Unfinished cars cannot be tested, entered in record attempts, or serviced.
+Finished cars appear in the Garage with a completion notice and can then be
+tuned, upgraded, and selected for campaign test runs.
+
+Engine selection in both the vehicle builder and Garage replacement defaults to
+a **new stock engine** at tune stage 0. Check **Reuse saved model tune** to apply
+the best tune previously developed for that exact engine model. Tunes are never
+transferred from the chassis or from another model, and learned model tunes
+remain saved after the last installed example is replaced. Reuse applies the
+saved tuning setup; it does not remove a physical engine from another car or
+change component purchase pricing. Gearbox ratio reuse is unchanged.
+
 Choose the test venue from the available track buttons. Track length,
 measured-mile position, altitude, temperature, air density, and surface friction
 remain stored on each track; the simulation uses track length, measured-mile

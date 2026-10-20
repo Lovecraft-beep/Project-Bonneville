@@ -6,9 +6,10 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from brakes import available_brakes
+from brakes import BRAKE_BY_NAME, available_brakes
 from chassis import CHASSIS_BY_ID
 from diagnostics import reset_vehicle_log
+from engines import AVAILABLE_ENGINES
 from campaign_world import (
     RivalState,
     WorldState,
@@ -30,12 +31,14 @@ from research import (
     BRAKE_TECHNOLOGY_BY_ID,
     CHASSIS_TECHNOLOGY_BY_ID,
     ENGINE_TECHNOLOGY_BY_ID,
+    ERA_ORDER,
     GEARBOX_TECHNOLOGY_BY_ID,
     TECHNOLOGY_NAME_BY_ID,
     TYRE_TECHNOLOGY_BY_ID,
     era_for_year,
 )
 from sponsors import (
+    DEVELOPMENT_OBJECTIVE,
     RUNS_OBJECTIVE,
     SPEED_OBJECTIVE,
     SPONSOR_BY_ID,
@@ -53,6 +56,12 @@ SEASON_START_DAYS = (1, 92, 183, 274)
 DEFAULT_TEAM_NAME = "Bonneville Racing Team"
 ENGINEER_HIRE_COST_GBP = 8_000.0
 MECHANIC_HIRE_COST_GBP = 5_000.0
+ENGINEER_WAGE_GBP = 250.0
+MECHANIC_WAGE_GBP = 100.0
+SPECIALIST_HIRE_COST_GBP = 16_000.0
+SPECIALIST_WAGE_GBP = 650.0
+EXPERIENCED_MECHANIC_HIRE_COST_GBP = 10_000.0
+EXPERIENCED_MECHANIC_WAGE_GBP = 250.0
 WORKSHOP_UPGRADE_BASE_COST_GBP = 10_000.0
 TRACKSIDE_ADJUSTMENT_COST_GBP = 5.0
 MAX_TESTS_PER_SESSION = 8
@@ -93,6 +102,17 @@ class Team:
     engineers: int = 1
     mechanics: int = 2
     workshop_level: int = 1
+    engineer_specialties: list[str] = field(default_factory=list)
+    experienced_mechanics: int = 0
+
+    @property
+    def payroll_per_turn_gbp(self):
+        return (
+            (self.engineers - len(self.engineer_specialties)) * ENGINEER_WAGE_GBP
+            + len(self.engineer_specialties) * SPECIALIST_WAGE_GBP
+            + (self.mechanics - self.experienced_mechanics) * MECHANIC_WAGE_GBP
+            + self.experienced_mechanics * EXPERIENCED_MECHANIC_WAGE_GBP
+        )
 
 
 @dataclass
@@ -177,8 +197,9 @@ class SponsorObjective:
     kind: str
     target: float
     reward_gbp: float
-    turns_remaining: int = SPONSOR_OBJECTIVE_DEADLINE_TURNS
+    turns_remaining: int | None = SPONSOR_OBJECTIVE_DEADLINE_TURNS
     runs_at_issue: int = 0
+    development_at_issue: int = 0
 
 
 @dataclass
@@ -245,6 +266,14 @@ class Garage:
 
 
 @dataclass
+class VehicleConstruction:
+    vehicle: GarageVehicle
+    complexity: int
+    turns_total: int
+    turns_remaining: int
+
+
+@dataclass
 class CampaignRecordAttempt:
     target_id: str
     vehicle_name: str
@@ -258,6 +287,7 @@ class CampaignRecordAttempt:
 
 
 TEAM_RECORD_TARGET_ID = "team_record"
+INAUGURAL_RECORD_TARGET_ID = "inaugural_record"
 
 
 @dataclass(frozen=True)
@@ -278,6 +308,7 @@ class EngineeringProject:
     turns_total: int
     turns_remaining: int
     engineers_required: int
+    specialists: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -287,20 +318,24 @@ class CampaignState:
     engineering_projects: list[EngineeringProject] = field(default_factory=list)
     sponsorship: SponsorshipState = field(default_factory=SponsorshipState)
     garage: Garage = field(default_factory=Garage)
+    vehicle_construction: list[VehicleConstruction] = field(default_factory=list)
     record_attempt: CampaignRecordAttempt | None = None
     campaign_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     current_year: int = STARTING_YEAR
     current_day_of_year: int = 1
     development_programs: dict[str, str] = field(default_factory=dict)
+    engine_tune_stages: dict[str, int] = field(default_factory=dict)
     turn_number: int = 1
     tests_this_session: int = 0
     record_runs_this_session: int = 0
     workshop_repair_pending: bool = False
     venues_paid_this_session: list[str] = field(default_factory=list)
     completed_runs: int = 0
+    completed_development_milestones: int = 0
     failed_runs: int = 0
     best_measured_mile_speed_mph: float = 0.0
     official_record_mph: float = 0.0
+    official_record_vehicle_name: str = ""
     completed_historical_record_ids: list[str] = field(default_factory=list)
     world: WorldState = field(default_factory=create_world_state)
 
@@ -324,6 +359,14 @@ class CampaignState:
     def available_engineers(self):
         return max(0, self.team.engineers - self.allocated_engineers)
 
+    @property
+    def cash_flow_per_turn_gbp(self):
+        return self.sponsorship.income_per_turn_gbp - self.team.payroll_per_turn_gbp
+
+    @property
+    def projected_next_turn_cash_gbp(self):
+        return round(self.team.cash + self.cash_flow_per_turn_gbp, 2)
+
 
 def calculate_run_cost(track):
     """Return the venue cost for one run."""
@@ -345,7 +388,11 @@ def mark_session_venue_paid(campaign, track):
 
 def next_vehicle_name(campaign):
     """Suggest a name, numbering later vehicles from the first vehicle's name."""
-    owned_vehicles = campaign.garage.vehicles + campaign.garage.museum
+    owned_vehicles = (
+        campaign.garage.vehicles
+        + campaign.garage.museum
+        + [project.vehicle for project in campaign.vehicle_construction]
+    )
     if not owned_vehicles:
         return "Bonneville Special 01"
 
@@ -392,6 +439,17 @@ def load_campaign(path=CAMPAIGN_FILE):
         vehicles=[GarageVehicle(**vehicle) for vehicle in garage_data["vehicles"]],
         museum=[GarageVehicle(**vehicle) for vehicle in garage_data["museum"]],
     )
+    data["vehicle_construction"] = [
+        VehicleConstruction(**{
+            **project,
+            "vehicle": GarageVehicle(**{
+                **project["vehicle"],
+                "aerodynamics_technology": tuple(project["vehicle"]["aerodynamics_technology"]),
+                "gearbox_ratios": tuple(project["vehicle"]["gearbox_ratios"]),
+            }),
+        })
+        for project in data.get("vehicle_construction", [])
+    ]
     record_attempt_data = data["record_attempt"]
     data["record_attempt"] = (
         CampaignRecordAttempt(**record_attempt_data)
@@ -401,7 +459,11 @@ def load_campaign(path=CAMPAIGN_FILE):
     world_data = data["world"]
     world_data["rivals"] = [RivalState(**rival) for rival in world_data["rivals"]]
     data["world"] = WorldState(**world_data)
-    return CampaignState(**data)
+    campaign = CampaignState(**data)
+    for objective in list(campaign.sponsorship.objectives):
+        if objective.kind == RUNS_OBJECTIVE:
+            issue_sponsor_objective(campaign, objective.sponsor_id)
+    return campaign
 
 
 def save_campaign(campaign, path=CAMPAIGN_FILE):
@@ -417,6 +479,7 @@ def complete_run(
     measured_mile_speed_mph,
     is_record_attempt=False,
     record_attempt_average_mph=None,
+    vehicle_name=None,
 ):
     """Charge a completed run and update campaign performance."""
     if run_cost_gbp > campaign.team.cash:
@@ -438,10 +501,12 @@ def complete_run(
             if record_attempt_average_mph is None
             else record_attempt_average_mph
         )
+        if record_speed_mph > campaign.official_record_mph:
+            campaign.official_record_vehicle_name = vehicle_name or ""
         campaign.official_record_mph = max(
             campaign.official_record_mph, record_speed_mph
         )
-        if previous_record is None or record_speed_mph > previous_record[0]:
+        if record_speed_mph > 0 and (previous_record is None or record_speed_mph > previous_record[0]):
             record_headline = (
                 f"WORLD RECORD: {campaign.team.name} extends its record to "
                 f"{record_speed_mph:.2f} mph."
@@ -504,10 +569,16 @@ def standing_world_record(campaign):
 
 
 def record_chase_target(campaign):
-    """Return the rival mark to beat, or the team's own mark to extend."""
+    """Return an inaugural, rival, or team record target for official attempts."""
     record = standing_world_record(campaign)
     if record is None:
-        return None
+        return CampaignRecordTarget(
+            record_id=INAUGURAL_RECORD_TARGET_ID,
+            year=campaign.current_year,
+            vehicle="Inaugural land-speed record",
+            speed_mph=0.0,
+            milestone="Set the first official record with a positive measured-mile speed.",
+        )
     if record[1] == campaign.team.name:
         return CampaignRecordTarget(
             record_id=TEAM_RECORD_TARGET_ID,
@@ -534,6 +605,14 @@ def record_attempt_target(campaign, attempt):
     )
     if historical_target is not None:
         return historical_target
+    if attempt.target_id == INAUGURAL_RECORD_TARGET_ID:
+        return CampaignRecordTarget(
+            record_id=INAUGURAL_RECORD_TARGET_ID,
+            year=attempt.target_year or attempt.started_year,
+            vehicle="Inaugural land-speed record",
+            speed_mph=0.0,
+            milestone="Set the first official record with a positive measured-mile speed.",
+        )
     if attempt.target_id != TEAM_RECORD_TARGET_ID:
         return None
     target_speed = attempt.target_speed_mph
@@ -570,6 +649,8 @@ def issue_sponsor_objective(campaign, sponsor_id):
         target=target,
         reward_gbp=sponsor.objective_reward_gbp,
         runs_at_issue=campaign.completed_runs,
+        development_at_issue=campaign.completed_development_milestones,
+        turns_remaining=None if sponsor.objective_kind == DEVELOPMENT_OBJECTIVE else SPONSOR_OBJECTIVE_DEADLINE_TURNS,
     )
     campaign.sponsorship.objectives = [
         item
@@ -581,32 +662,34 @@ def issue_sponsor_objective(campaign, sponsor_id):
 
 def sponsor_objective_progress(campaign, objective):
     """Return (current, target) progress for display."""
-    if objective.kind == RUNS_OBJECTIVE:
-        return campaign.completed_runs - objective.runs_at_issue, objective.target
+    if objective.kind == DEVELOPMENT_OBJECTIVE:
+        return campaign.completed_development_milestones - objective.development_at_issue, objective.target
     return campaign.best_measured_mile_speed_mph, objective.target
 
 
 def describe_sponsor_objective(campaign, objective):
     current, target = sponsor_objective_progress(campaign, objective)
-    if objective.kind == RUNS_OBJECTIVE:
-        demand = f"Complete {target:.0f} successful runs ({min(current, target):.0f}/{target:.0f})"
+    if objective.kind == DEVELOPMENT_OBJECTIVE:
+        demand = f"Complete {target:.0f} research or vehicle build milestone ({min(current, target):.0f}/{target:.0f})"
     else:
         demand = f"Reach {target:.1f} mph on a measured mile"
     turns = objective.turns_remaining
+    if turns is None:
+        return f"{demand}  /  reward GBP {objective.reward_gbp:,.0f}  /  ongoing partnership, no deadline"
     return (
         f"{demand}  /  reward GBP {objective.reward_gbp:,.0f}  /  "
         f"{turns} turn{'s' if turns != 1 else ''} left"
     )
 
 
-def check_sponsor_objectives(campaign, measured_mile_speed_mph):
-    """Pay out objectives met by a completed run and issue each sponsor's next demand."""
+def check_sponsor_objectives(campaign, measured_mile_speed_mph=None):
+    """Reward speed achievements or completed development, then renew objectives."""
     messages = []
     for objective in list(campaign.sponsorship.objectives):
-        if objective.kind == RUNS_OBJECTIVE:
-            met = campaign.completed_runs - objective.runs_at_issue >= objective.target
+        if objective.kind == DEVELOPMENT_OBJECTIVE:
+            met = campaign.completed_development_milestones - objective.development_at_issue >= objective.target
         else:
-            met = measured_mile_speed_mph >= objective.target
+            met = measured_mile_speed_mph is not None and measured_mile_speed_mph >= objective.target
         if not met:
             continue
         sponsor = SPONSOR_BY_ID[objective.sponsor_id]
@@ -625,6 +708,8 @@ def _expire_sponsor_objectives(campaign):
     sponsorship = campaign.sponsorship
     sponsorship.recent_departures = []
     for objective in list(sponsorship.objectives):
+        if objective.turns_remaining is None:
+            continue
         objective.turns_remaining -= 1
         if objective.turns_remaining > 0:
             continue
@@ -662,9 +747,7 @@ def advance_turn(campaign, days=None):
             else 366
         )
         days = next_season_day - campaign.current_day_of_year
-    campaign.team.cash = round(
-        campaign.team.cash + campaign.sponsorship.income_per_turn_gbp, 2
-    )
+    campaign.team.cash = campaign.projected_next_turn_cash_gbp
     campaign.turn_number += 1
     campaign.tests_this_session = 0
     campaign.record_runs_this_session = 0
@@ -685,11 +768,34 @@ def advance_turn(campaign, days=None):
             for project in campaign.engineering_projects
             if project.technology_id not in completed_projects
         ]
+    completed_vehicles = []
+    for construction in campaign.vehicle_construction:
+        construction.turns_remaining -= 1
+        if construction.turns_remaining <= 0:
+            campaign.garage.vehicles.append(construction.vehicle)
+            completed_vehicles.append(construction.vehicle.vehicle_name)
+    campaign.vehicle_construction = [
+        construction
+        for construction in campaign.vehicle_construction
+        if construction.turns_remaining > 0
+    ]
     advance_world(campaign)
+    if campaign.team.cash < 0:
+        campaign.world.headlines.append(
+            f"PAYROLL WARNING: cash deficit GBP {-campaign.team.cash:,.0f}. "
+            "Reduce staffing or secure sponsor funding."
+        )
+    for vehicle_name in completed_vehicles:
+        campaign.world.headlines.append(
+            f"CONSTRUCTION COMPLETE: {vehicle_name} is ready in the Garage."
+        )
     for technology_id in completed_projects:
         campaign.world.headlines.append(
             f"RESEARCH COMPLETE: {TECHNOLOGY_NAME_BY_ID[technology_id]} is now available to the team."
         )
+    campaign.completed_development_milestones += len(completed_projects) + len(completed_vehicles)
+    for message in check_sponsor_objectives(campaign):
+        campaign.world.headlines.append(message)
     del campaign.world.headlines[:-8]
     _expire_sponsor_objectives(campaign)
     return tuple(completed_projects)
@@ -770,6 +876,34 @@ _ENGINEERING_PROJECT_BRANCHES = {
 }
 
 
+def available_engineer_specialties(campaign):
+    available = list(campaign.team.engineer_specialties)
+    for project in campaign.engineering_projects:
+        for specialty in project.specialists:
+            available.remove(specialty)
+    return available
+
+
+def _project_specialists(campaign, branch, engineers_required):
+    available = available_engineer_specialties(campaign)
+    assigned = []
+    if branch in available:
+        assigned.append(branch)
+        available.remove(branch)
+    ordinary_allocated = sum(
+        project.engineers_required - len(project.specialists)
+        for project in campaign.engineering_projects
+    )
+    ordinary_available = (
+        campaign.team.engineers - len(campaign.team.engineer_specialties)
+        - ordinary_allocated
+    )
+    other_specialists_needed = max(
+        0, engineers_required - len(assigned) - ordinary_available
+    )
+    return assigned + available[:other_specialists_needed]
+
+
 def start_engineering_project(campaign, branch, technology_id):
     """Fund a technology project and reserve its required engineering staff."""
     branch = branch.lower()
@@ -818,6 +952,7 @@ def start_engineering_project(campaign, branch, technology_id):
         turns_total=turns_required,
         turns_remaining=turns_required,
         engineers_required=technology.engineers_required,
+        specialists=_project_specialists(campaign, branch, technology.engineers_required),
     )
     campaign.team.cash = round(campaign.team.cash - project_cost, 2)
     campaign.engineering_projects.append(project)
@@ -840,6 +975,8 @@ def engineering_project_terms(campaign, branch, technology):
             turn_adjustment = 1
     project_cost = round(technology.cost_gbp * cost_factor, 2)
     turns_required = max(1, technology.turns_required + turn_adjustment)
+    if branch in available_engineer_specialties(campaign):
+        turns_required = max(1, turns_required - 1)
     return project_cost, turns_required
 
 
@@ -919,6 +1056,55 @@ def hire_mechanic(campaign):
     campaign.team.mechanics += 1
 
 
+def hire_specialist_engineer(campaign, specialty):
+    if specialty not in _ENGINEERING_PROJECT_BRANCHES:
+        raise ValueError("unknown engineering specialty")
+    if campaign.team.cash < SPECIALIST_HIRE_COST_GBP:
+        raise ValueError("insufficient funds to hire a specialist")
+    campaign.team.cash = round(campaign.team.cash - SPECIALIST_HIRE_COST_GBP, 2)
+    campaign.team.engineers += 1
+    campaign.team.engineer_specialties.append(specialty)
+
+
+def hire_experienced_mechanic(campaign):
+    if campaign.team.cash < EXPERIENCED_MECHANIC_HIRE_COST_GBP:
+        raise ValueError("insufficient funds to hire an experienced mechanic")
+    campaign.team.cash = round(campaign.team.cash - EXPERIENCED_MECHANIC_HIRE_COST_GBP, 2)
+    campaign.team.mechanics += 1
+    campaign.team.experienced_mechanics += 1
+
+
+def dismiss_engineer(campaign, specialty=None):
+    if campaign.record_attempt is not None:
+        raise ValueError("finish the official attempt before releasing staff")
+    if campaign.team.engineers <= 1:
+        raise ValueError("retain at least one engineer for future research")
+    if specialty is not None:
+        if specialty not in available_engineer_specialties(campaign):
+            raise ValueError("no unassigned specialist in this branch")
+        campaign.team.engineer_specialties.remove(specialty)
+    else:
+        ordinary_allocated = sum(
+            project.engineers_required - len(project.specialists)
+            for project in campaign.engineering_projects
+        )
+        if campaign.team.engineers - len(campaign.team.engineer_specialties) <= ordinary_allocated:
+            raise ValueError("no unassigned standard engineer to release")
+    campaign.team.engineers -= 1
+
+
+def dismiss_mechanic(campaign, experienced=False):
+    if campaign.record_attempt is not None:
+        raise ValueError("finish the official attempt before releasing staff")
+    if experienced:
+        if campaign.team.experienced_mechanics <= 0:
+            raise ValueError("no experienced mechanic to release")
+        campaign.team.experienced_mechanics -= 1
+    elif campaign.team.mechanics <= campaign.team.experienced_mechanics:
+        raise ValueError("no standard mechanic to release")
+    campaign.team.mechanics -= 1
+
+
 def upgrade_workshop(campaign):
     """Spend cash to raise the workshop level."""
     cost_gbp = calculate_workshop_upgrade_cost(campaign.team)
@@ -929,15 +1115,51 @@ def upgrade_workshop(campaign):
     campaign.team.workshop_level += 1
 
 
+def vehicle_construction_complexity(garage_entry):
+    """Rate the most advanced fitted technology from 1 (Pioneer) to 5 (Modern)."""
+    chassis = CHASSIS_BY_ID[garage_entry.chassis_id]
+    engine = AVAILABLE_ENGINES[garage_entry.engine_name]
+    technology_nodes = [
+        CHASSIS_TECHNOLOGY_BY_ID.get(chassis.required_technology),
+        ENGINE_TECHNOLOGY_BY_ID.get(engine.required_technology),
+        *[
+            AERODYNAMICS_TECHNOLOGY_BY_ID[technology_id]
+            for technology_id in garage_entry.aerodynamics_technology
+        ],
+    ]
+    eras = [node.era for node in technology_nodes if node is not None]
+    eras.append(era_for_year(BRAKE_BY_NAME[garage_entry.brakes_name].introduced_year).name)
+    return 1 + max(ERA_ORDER.index(era) for era in eras)
+
+
 def build_vehicle(campaign, garage_entry, cost_gbp, vehicle=None):
-    """Pay the construction cost and save a new vehicle to the garage."""
+    """Pay up front and queue construction; End Turn delivers finished vehicles."""
+    if campaign.record_attempt is not None:
+        raise ValueError("finish the official record attempt before starting construction")
+    owned_vehicles = (
+        campaign.garage.vehicles
+        + campaign.garage.museum
+        + [project.vehicle for project in campaign.vehicle_construction]
+    )
+    if any(entry.vehicle_name.casefold() == garage_entry.vehicle_name.casefold() for entry in owned_vehicles):
+        raise ValueError("vehicle name is already in use")
+    if cost_gbp < 0:
+        raise ValueError("construction cost must not be negative")
     if campaign.team.cash < cost_gbp:
         raise ValueError("insufficient funds to build this vehicle")
 
+    complexity = vehicle_construction_complexity(garage_entry)
+    construction = VehicleConstruction(
+        vehicle=deepcopy(garage_entry),
+        complexity=complexity,
+        turns_total=complexity,
+        turns_remaining=complexity,
+    )
     campaign.team.cash = round(campaign.team.cash - cost_gbp, 2)
-    campaign.garage.vehicles.append(garage_entry)
+    campaign.vehicle_construction.append(construction)
     if vehicle is not None:
         reset_vehicle_log(vehicle)
+    return construction
 
 
 def _charge_trackside_adjustment(campaign):

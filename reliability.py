@@ -48,6 +48,7 @@ def calculate_team_skill_modifier(team, sponsor_reliability_bonus=0.0):
     """Reduce failure risk as engineers, mechanics, and sponsors are added."""
     staff_skill = (
         0.08 * team.engineers + 0.04 * team.mechanics + sponsor_reliability_bonus
+        + 0.04 * getattr(team, "experienced_mechanics", 0)
     )
     return max(MIN_TEAM_SKILL_MODIFIER, 1.0 - staff_skill)
 
@@ -71,7 +72,7 @@ def can_repair_trackside(team):
     """Return whether the team can repair a failure at the track."""
     return (
         team.engineers >= REQUIRED_ENGINEERS_FOR_REPAIR
-        and team.mechanics >= REQUIRED_MECHANICS_FOR_REPAIR
+        and team.mechanics + getattr(team, "experienced_mechanics", 0) >= REQUIRED_MECHANICS_FOR_REPAIR
     )
 
 

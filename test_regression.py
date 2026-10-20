@@ -186,6 +186,98 @@ class TestSessionTests(unittest.TestCase):
 
 
 class RecordChaseTests(unittest.TestCase):
+    def test_inaugural_attempt_runs_through_the_ui_without_a_rival_record(self):
+        from ui.app import BonnevilleApp
+
+        for speed in (0.0, 20.0):
+            with self.subTest(speed=speed):
+                campaign = CampaignState()
+                entry = GarageVehicle(
+                    "First Car", "improvised_chassis", PIONEER_SINGLE_CYLINDER.name,
+                    "2-Speed Transmission", "Wooden block brakes",
+                )
+                campaign.garage.vehicles.append(entry)
+                app = SimpleNamespace(
+                    campaign=campaign, garage_return_required=False,
+                    last_run_outcome=None, last_run_repaired=False,
+                    last_report=None, show_page=Mock(),
+                    _render_record_vehicle_choices=Mock(),
+                )
+                BonnevilleApp.start_record_attempt(app)
+                target = app._render_record_vehicle_choices.call_args.args[0]
+                self.assertEqual(target.record_id, "inaugural_record")
+                result = SimpleNamespace(
+                    peak_speed_mph=speed, measured_mile_speed_mph=speed, telemetry=[],
+                )
+                with (
+                    patch("ui.app.build_vehicle_from_garage_entry", return_value=AVAILABLE_CARS["1"]()),
+                    patch("ui.app.messagebox.askyesno", return_value=True),
+                    patch("ui.app.run_simulation", return_value=result),
+                    patch("ui.app.resolve_run_failure", return_value=SimpleNamespace(failed=False, repaired=False)),
+                    patch("ui.app.append_run_log"),
+                    patch("ui.app.save_campaign"),
+                    patch("ui.app.create_record") as make_record,
+                    patch("ui.app.save_record"),
+                    patch("ui.app.create_engineering_report"),
+                ):
+                    BonnevilleApp.execute_run(app, entry, PUBLIC_ROADS, record_attempt=True)
+                self.assertIsNone(campaign.record_attempt)
+                self.assertEqual(campaign.record_runs_this_session, 1)
+                self.assertEqual(campaign.official_record_mph, speed)
+                self.assertEqual(make_record.call_args.kwargs["official_average_mph"], speed)
+                self.assertEqual(make_record.call_args.kwargs["world_record_set"], speed > 0)
+                if speed > 0:
+                    self.assertEqual(campaign.official_record_vehicle_name, entry.vehicle_name)
+                self.assertIn(
+                    "inaugural land-speed record has been established" if speed > 0
+                    else "No inaugural record credited",
+                    app.last_record_message,
+                )
+
+    def test_fresh_career_can_target_and_set_the_inaugural_record(self):
+        from management import record_chase_target, standing_world_record
+
+        campaign = CampaignState()
+        self.assertIsNone(standing_world_record(campaign))
+        target = record_chase_target(campaign)
+        self.assertEqual(target.record_id, "inaugural_record")
+        self.assertEqual(target.speed_mph, 0.0)
+        from historical_records import target_completed
+        from ui.app import record_gap_headline
+
+        self.assertFalse(target_completed(target, 0.0))
+        self.assertTrue(target_completed(target, 20.0))
+        self.assertEqual(record_gap_headline(target, 20.0), "Set inaugural record")
+        complete_run(campaign, 0.0, 20.0, is_record_attempt=True)
+        self.assertEqual(standing_world_record(campaign), (20.0, campaign.team.name, 1895))
+        self.assertEqual(record_chase_target(campaign).record_id, "team_record")
+
+    def test_practice_or_zero_speed_does_not_establish_an_inaugural_record(self):
+        from management import record_chase_target, standing_world_record
+
+        campaign = CampaignState()
+        complete_run(campaign, 0.0, 20.0)
+        complete_run(campaign, 0.0, 0.0, is_record_attempt=True)
+        self.assertIsNone(standing_world_record(campaign))
+        self.assertEqual(record_chase_target(campaign).record_id, "inaugural_record")
+        self.assertFalse(any("WORLD RECORD:" in item for item in campaign.world.headlines))
+
+    def test_saved_inaugural_attempt_restores_its_target(self):
+        from management import record_attempt_target
+
+        campaign = CampaignState()
+        campaign.record_attempt = CampaignRecordAttempt(
+            "inaugural_record", "First Car", "Public Roads", 1895, 1,
+            target_year=1895, target_speed_mph=0.0,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            save_campaign(campaign, path)
+            restored = load_campaign(path)
+        target = record_attempt_target(restored, restored.record_attempt)
+        self.assertEqual(target.record_id, "inaugural_record")
+        self.assertEqual(target.speed_mph, 0.0)
+
     def test_team_record_becomes_a_target_to_extend(self):
         from management import record_chase_target
 
@@ -320,6 +412,92 @@ class RecordChaseTests(unittest.TestCase):
         self.assertEqual(record_gap_headline(None, 500.0), "No rival record to chase")
 
 
+class MuseumHistoryTests(unittest.TestCase):
+    def test_museum_status_changes_when_the_retired_cars_record_is_beaten(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        campaign.official_record_mph = 80
+        campaign.official_record_vehicle_name = "Museum Car"
+        campaign.garage.museum.append(GarageVehicle(
+            "Museum Car", "improvised_chassis", PIONEER_SINGLE_CYLINDER.name,
+            "2-Speed Transmission", "Wooden block brakes",
+        ))
+        runs = [dict(
+            campaign_id=campaign.campaign_id, car_name="Museum Car",
+            peak_speed_mph=90, measured_mile_speed_mph=85, official_average_mph=80,
+            world_record_set=True, campaign_year=1895, campaign_season="Summer",
+            track_name="Public Roads",
+        )]
+        app = SimpleNamespace(campaign=campaign, scroll_area=Mock(), page_title=Mock(), section=Mock())
+        for rival_speed, status in ((0, "Current"), (81, "Former")):
+            with self.subTest(rival_speed=rival_speed):
+                campaign.world.record_speed_mph = rival_speed
+                campaign.world.record_holder = "Rival Team"
+                with patch("ui.app.load_records", return_value=runs), patch("ui.app.tk.Frame"), patch("ui.app.tk.Label") as labels:
+                    BonnevilleApp.render_museum(app)
+                text = "\n".join(call.kwargs.get("text", "") for call in labels.call_args_list)
+                self.assertIn(f"{status} world-record holder", text)
+                self.assertIn("Peak speed: 90.0 mph", text)
+                self.assertIn("Best official average: 80.00 mph", text)
+                self.assertIn("Summer 1895: 80.00 mph", text)
+                self.assertIn("World records set: 1", text)
+
+    def test_official_achievement_metadata_survives_record_file_roundtrip(self):
+        campaign = CampaignState()
+        vehicle = AVAILABLE_CARS["1"]()
+        result = SimpleNamespace(
+            peak_speed_mph=30, measured_mile_speed_mph=25,
+            average_acceleration_g=0.1, average_deceleration_g=0.1,
+            full_throttle_seconds=50,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(records, "RECORDS_FILE", Path(directory) / "records.json"):
+                records.save_record(records.create_record(
+                    vehicle, PUBLIC_ROADS, result, campaign,
+                    official_average_mph=22.5, world_record_set=True,
+                ))
+                history = records.vehicle_history(records.load_records(), campaign.campaign_id, vehicle.name)
+        self.assertEqual(history.official_best_mph, 22.5)
+        self.assertEqual(history.world_records[0]["campaign_year"], 1895)
+        self.assertEqual(history.world_records[0]["campaign_season"], "Spring")
+
+    def test_history_separates_peak_practice_and_official_results_by_car_and_career(self):
+        runs = [
+            dict(campaign_id="career", car_name="Retired Car", peak_speed_mph=110, measured_mile_speed_mph=100),
+            dict(campaign_id="career", car_name="Retired Car", peak_speed_mph=90, measured_mile_speed_mph=85,
+                 official_average_mph=80, world_record_set=True, campaign_year=1895, campaign_season="Summer"),
+            dict(campaign_id="other", car_name="Retired Car", peak_speed_mph=999, measured_mile_speed_mph=999,
+                 official_average_mph=999, world_record_set=True),
+            dict(campaign_id="career", car_name="Another Car", peak_speed_mph=888, measured_mile_speed_mph=888),
+        ]
+        history = records.vehicle_history(runs, "career", "Retired Car")
+        self.assertEqual(history.peak_speed_mph, 110)
+        self.assertEqual(history.best_measured_mile_mph, 100)
+        self.assertEqual(history.official_best_mph, 80)
+        self.assertEqual(len(history.world_records), 1)
+
+    def test_legacy_runs_and_unrun_cars_do_not_gain_invented_record_credits(self):
+        legacy = dict(campaign_id="career", car_name="Old Car", peak_speed_mph=100, measured_mile_speed_mph=95)
+        history = records.vehicle_history([legacy], "career", "Old Car")
+        self.assertEqual(history.peak_speed_mph, 100)
+        self.assertIsNone(history.official_best_mph)
+        self.assertEqual(history.world_records, [])
+        empty = records.vehicle_history([], "career", "Unrun Car")
+        self.assertIsNone(empty.peak_speed_mph)
+        self.assertIsNone(empty.official_best_mph)
+
+    def test_official_best_retains_vehicle_attribution_until_another_car_improves_it(self):
+        campaign = CampaignState()
+        complete_run(campaign, 0, 20, is_record_attempt=True, vehicle_name="First Car")
+        self.assertEqual(campaign.official_record_vehicle_name, "First Car")
+        complete_run(campaign, 0, 25)
+        complete_run(campaign, 0, 19, is_record_attempt=True, vehicle_name="Second Car")
+        self.assertEqual(campaign.official_record_vehicle_name, "First Car")
+        complete_run(campaign, 0, 21, is_record_attempt=True, vehicle_name="Second Car")
+        self.assertEqual(campaign.official_record_vehicle_name, "Second Car")
+
+
 class VehicleNamingTests(unittest.TestCase):
     def test_new_design_inherits_engine_tune_and_matching_gearbox_ratios(self):
         from ui.app import BonnevilleApp
@@ -350,7 +528,7 @@ class VehicleNamingTests(unittest.TestCase):
         )
         app._aerodynamics_summary = lambda technology_ids=None: "None researched\nCumulative drag reduction: 0%"
 
-        BonnevilleApp.builder_select(app, "engine", PIONEER_SINGLE_CYLINDER)
+        BonnevilleApp.builder_select(app, "engine", PIONEER_SINGLE_CYLINDER, reuse_engine_tune=True)
         BonnevilleApp.builder_select(app, "gearbox", TRANSMISSION_CATALOG[1])
         self.assertEqual(app.builder["engine_tune_stage"], 2)
         self.assertEqual(app.builder["gearbox"].gears, (3.6, 2.2))
@@ -371,6 +549,7 @@ class VehicleNamingTests(unittest.TestCase):
 
         confirmation_text = confirm.call_args.args[1]
         self.assertIn("Engine tune: Stage 2", confirmation_text)
+        self.assertIn("Complexity: 1/5  /  Build time: 1 turn(s)", confirmation_text)
         self.assertIn("2-Speed Transmission ratios: 3.60 / 2.20", confirmation_text)
         self.assertIn("Final drive: 1.80", confirmation_text)
         entry = build.call_args.args[1]
@@ -445,6 +624,93 @@ class VehicleNamingTests(unittest.TestCase):
 
 
 class EngineTuningTests(unittest.TestCase):
+    def test_tuning_records_the_setup_for_only_the_installed_model(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        entry = self._garage_entry()
+        app = SimpleNamespace(campaign=campaign, open_garage_vehicle=Mock())
+        with patch("ui.app.save_campaign"):
+            BonnevilleApp.set_engine_tune(app, entry, 2)
+        self.assertEqual(campaign.engine_tune_stages, {entry.engine_name: 2})
+        self.assertEqual(entry.engine_tune_stage, 2)
+
+    def test_builder_requires_explicit_reuse_and_keeps_engine_models_separate(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        campaign.engine_tune_stages[PIONEER_SINGLE_CYLINDER.name] = 3
+        app = SimpleNamespace(campaign=campaign, builder={}, render_builder=Mock())
+        app._inherited_engine_tune_stage = lambda name: BonnevilleApp._inherited_engine_tune_stage(app, name)
+        BonnevilleApp.builder_select(app, "engine", PIONEER_SINGLE_CYLINDER)
+        self.assertEqual(app.builder["engine_tune_stage"], 0)
+        BonnevilleApp.builder_select(app, "engine", PIONEER_SINGLE_CYLINDER, reuse_engine_tune=True)
+        self.assertEqual(app.builder["engine_tune_stage"], 3)
+        BonnevilleApp.builder_select(app, "engine", WELCH_HEMI, reuse_engine_tune=True)
+        self.assertEqual(app.builder["engine_tune_stage"], 0)
+
+    def test_new_stock_and_reused_model_tunes_are_distinct_during_swaps(self):
+        from ui.app import BonnevilleApp
+
+        for reuse, expected in ((False, 0), (True, 2)):
+            with self.subTest(reuse=reuse):
+                campaign = CampaignState()
+                entry = GarageVehicle(
+                    "Swap Car", "improvised_chassis", PIONEER_SINGLE_CYLINDER.name,
+                    TRANSMISSION_CATALOG[1].name, "Wooden block brakes", engine_tune_stage=3,
+                )
+                campaign.garage.vehicles.append(entry)
+                campaign.engine_tune_stages[WELCH_HEMI.name] = 2
+                app = SimpleNamespace(campaign=campaign, open_garage_vehicle=Mock())
+                app._inherited_engine_tune_stage = lambda name: BonnevilleApp._inherited_engine_tune_stage(app, name)
+                app._gearbox_with_saved_ratios = lambda gearbox, exclude_entry=None: (gearbox, False)
+                with patch("ui.app.save_campaign"):
+                    BonnevilleApp.apply_component(app, entry, "engine", WELCH_HEMI, Mock(), reuse_engine_tune=reuse)
+                self.assertEqual(entry.engine_tune_stage, expected)
+                self.assertEqual(campaign.engine_tune_stages[PIONEER_SINGLE_CYLINDER.name], 3)
+                self.assertEqual(campaign.engine_tune_stages[WELCH_HEMI.name], 2)
+                self.assertEqual(app._inherited_engine_tune_stage(WELCH_HEMI.name), 2)
+
+    def test_removed_engine_model_tune_survives_save_load_and_can_be_refitted(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        entry = GarageVehicle(
+            "Swap Car", "improvised_chassis", PIONEER_SINGLE_CYLINDER.name,
+            TRANSMISSION_CATALOG[1].name, "Wooden block brakes", engine_tune_stage=3,
+        )
+        campaign.garage.vehicles.append(entry)
+        app = SimpleNamespace(campaign=campaign, open_garage_vehicle=Mock())
+        app._inherited_engine_tune_stage = lambda name: BonnevilleApp._inherited_engine_tune_stage(app, name)
+        app._gearbox_with_saved_ratios = lambda gearbox, exclude_entry=None: (gearbox, False)
+        with patch("ui.app.save_campaign"):
+            BonnevilleApp.apply_component(app, entry, "engine", WELCH_HEMI, Mock())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            save_campaign(campaign, path)
+            app.campaign = load_campaign(path)
+        restored = app.campaign.garage.vehicles[0]
+        with patch("ui.app.save_campaign"):
+            BonnevilleApp.apply_component(app, restored, "engine", PIONEER_SINGLE_CYLINDER, Mock(), reuse_engine_tune=True)
+        self.assertEqual(restored.engine_tune_stage, 3)
+
+    def test_swapping_to_an_untuned_engine_model_does_not_inherit_chassis_tune(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        entry = GarageVehicle(
+            "Engine Swap", "improvised_chassis", PIONEER_SINGLE_CYLINDER.name,
+            TRANSMISSION_CATALOG[1].name, "Wooden block brakes", engine_tune_stage=3,
+        )
+        campaign.garage.vehicles.append(entry)
+        app = SimpleNamespace(campaign=campaign, open_garage_vehicle=Mock())
+        app._inherited_engine_tune_stage = lambda name: BonnevilleApp._inherited_engine_tune_stage(app, name)
+        app._gearbox_with_saved_ratios = lambda gearbox, exclude_entry=None: (gearbox, False)
+        with patch("ui.app.save_campaign"):
+            BonnevilleApp.apply_component(app, entry, "engine", WELCH_HEMI, Mock())
+        self.assertEqual(entry.engine_name, WELCH_HEMI.name)
+        self.assertEqual(entry.engine_tune_stage, 0)
+
     def _garage_entry(self, stage=0):
         return GarageVehicle(
             vehicle_name="Tune Test",
@@ -1867,6 +2133,9 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
             + brakes.cost_gbp
         )
         build_vehicle(campaign, garage_entry, cost_gbp)
+        self.assertEqual(len(campaign.garage.vehicles), 0)
+        for _ in range(campaign.vehicle_construction[0].turns_total):
+            advance_turn(campaign)
         self.assertEqual(len(campaign.garage.vehicles), 1)
 
         rebuilt = build_vehicle_from_garage_entry(garage_entry)
@@ -1927,13 +2196,13 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         self.assertIsNot(renewed, objective)
         self.assertEqual(renewed.turns_remaining, 3)
 
-    def test_runs_objective_counts_runs_since_issue(self):
+    def test_technical_sponsor_does_not_require_repetitive_runs(self):
         campaign = CampaignState(completed_runs=4)
         objective = sign_sponsor(campaign, "castrol")
-        for _ in range(2):
+        for _ in range(6):
             self.assertEqual(complete_run(campaign, 0, 10.0), [])
-        self.assertEqual(len(complete_run(campaign, 0, 10.0)), 1)
-        self.assertEqual(objective.runs_at_issue, 4)
+        self.assertEqual(objective.kind, "development")
+        self.assertIsNone(objective.turns_remaining)
 
     def test_missed_deadline_sponsor_withdraws_for_good(self):
         campaign = CampaignState(current_year=1908)
@@ -1960,8 +2229,9 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
             save_campaign(campaign, path)
             loaded = load_campaign(path)
         objective = loaded.sponsorship.objective_for("castrol")
-        self.assertEqual(objective.target, 3)
-        self.assertEqual(objective.turns_remaining, 3)
+        self.assertEqual(objective.target, 1)
+        self.assertEqual(objective.kind, "development")
+        self.assertIsNone(objective.turns_remaining)
 
     def test_campaign_save_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
