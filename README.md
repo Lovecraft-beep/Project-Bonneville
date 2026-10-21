@@ -102,8 +102,11 @@ time between development projects. Existing saved run-quota contracts are
 converted to these development objectives on load.
 
 Speed-focused sponsors retain their timed measured-mile objectives and
-withdrawal rules. The Team screen and Dashboard distinguish ongoing technical
-partnerships from those timed commitments.
+withdrawal rules. Missing a deadline withdraws their support for one turn, not
+permanently. The Team screen shows a temporary notice; after the next End Turn,
+the notice clears and negotiations reopen under the normal reputation rules.
+The Team screen and Dashboard distinguish ongoing technical partnerships from
+those timed commitments.
 
 Research is managed through multi-turn engineering projects. Starting a project
 spends its cost and reserves its required engineers; it advances on every
@@ -116,9 +119,17 @@ and current progress before a project is started.
 The campaign starts in Spring 1895 and uses four seasonal turns per year:
 Spring, Summer, Autumn, Winter, then Spring of the next year. Only **End turn**
 advances the season; research, management actions, and runs do not advance time.
-Each seasonal turn pays sponsor income and staff wages, progresses research and vehicle
-construction, updates rival attempts, and resets the test and record sessions. Seasons provide the
-calendar foundation for future weather effects; weather is not yet simulated.
+Each seasonal turn pays sponsor income and staff wages, progresses research and
+vehicle construction, updates rival attempts, and resets the test and record
+sessions. Seasons provide the calendar foundation for future weather effects;
+weather is not yet simulated.
+
+End Turn fast-forwards from dates in 1914-1918 to Spring 1919, and from dates in
+1939-1946 to Spring 1947, reflecting the pause in record-breaking activity.
+Every elapsed season still counts for payroll, sponsor deadlines, research,
+vehicle construction, workshop work, and campaign turn numbering. Historical
+rival attempts are processed through the resumed date; no player records or test
+runs are invented during the pause.
 
 Test runs now include named failure risks: `Misfire`, `Oil leak`, `Gear
 failure`, `Tyre burst`, `Brake fade`, and `Steering vibration`. Failure
@@ -140,6 +151,44 @@ total setup cost.
 The default run uses a 10-mile track with the measured mile beginning at mile
 4. Telemetry is recorded at one-second intervals, with an additional final
 sample when the run ends between intervals.
+
+## Vehicle Condition and Incidents
+
+Campaign cars retain wear, damage, and workshop progress between turns and saves.
+Both tests and official passes add wear: 0.25 points at very low speed, rising
+slowly with peak speed. Forty runs at 100 mph leave a car Worn with less than 1%
+loss of power, grip, and braking. Wear also gradually increases failure exposure.
+Sandbox cars do not affect career condition.
+
+| Condition | Threshold | Workshop Work | Cost Versus Replacement |
+| --- | --- | --- | --- |
+| Pristine | Wear below 10, no damage | Optional service for accumulated wear | 8% |
+| Worn | Wear 10 or more, no damage | Service | 8% |
+| Damaged | Damage above 0 and below 60 | Repair; running remains possible with penalties | 30% |
+| Heavily Damaged | Damage 60 to below 100 | Major repair; cannot run | 65% |
+| Destroyed | Damage 100 | Rebuild; cannot run | 100% |
+
+Replacement value uses the fitted chassis, stock engine, gearbox, and brakes.
+Workshop work is paid up front and requires a mechanic. Service takes a quarter
+of the vehicle's complexity-based build time, repairs half, major repairs three
+quarters, and rebuilds the full build time, rounded up to at least one turn.
+The Garage quotes the price and duration and shows progress. Condition returns
+to Pristine only when the job completes; End Turn without a paid job does not
+repair damage. Work in progress locks runs and component changes. Servicing does
+not count as new development for sponsor milestone rewards.
+
+Incident damage combines failure type and a speed-squared severity factor. A
+tyre burst assessed at 100 mph adds about 20 damage; at 400 mph it destroys a
+pristine car. The current incident speed estimate is the simulated run's peak
+speed, not a separately simulated crash trajectory. Severe brake or steering
+incidents can also prevent trackside repairs. Minor trackside fixes do not
+remove accumulated wear or accident damage.
+
+An incident leaving a car Heavily Damaged costs 3 reputation; destruction costs
+5, with reputation floored at zero. These penalties are not undone by repairs.
+Unrepairable incidents cancel active official attempts and end the current test
+session. No failed incident is credited as an official record. Damage and the
+latest incident assessment are visible in the Garage and team debrief.
 
 ## Research Progression
 
@@ -218,7 +267,9 @@ research branch, Garage, telemetry, and the next test or record attempt.
 The debrief compares measured-mile speed with the preceding run only when both
 runs completed and used the same vehicle name and venue. It also shows the gap
 to the historical campaign target and distinguishes test pace from an official
-record attempt. Aborted runs prioritize the named failure and label simulated
+record attempt. A successful official attempt reports its credited result and
+future development advice rather than prompting another attempt at the mark
+just beaten. Aborted runs prioritize the named failure and label simulated
 speeds as estimates, not valid records. Reports remain available through the
 Team Debrief navigation for the current session; sandbox reports do not change
 the campaign. Reviewing a report spends no funds and advances no time.
@@ -314,7 +365,13 @@ the best tune previously developed for that exact engine model. Tunes are never
 transferred from the chassis or from another model, and learned model tunes
 remain saved after the last installed example is replaced. Reuse applies the
 saved tuning setup; it does not remove a physical engine from another car or
-change component purchase pricing. Gearbox ratio reuse is unchanged.
+change component purchase pricing. Applying a new tune step costs 5%, 10%, or
+15% of the stock engine's purchase price for stages 1, 2, and 3 respectively,
+rounded to GBP 100 with a GBP 100 minimum. Only one tune step can be applied
+across the entire team each seasonal turn; **End turn** resets the limit. The
+Garage quotes the charge and reliability penalty before confirmation. Reusing
+an already developed model tune does not incur a second tuning charge. Gearbox
+ratio adjustment rules are unchanged.
 
 Choose the test venue from the available track buttons. Track length,
 measured-mile position, altitude, temperature, air density, and surface friction

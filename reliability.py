@@ -2,6 +2,7 @@
 
 import random
 from dataclasses import dataclass
+from condition import assess_incident_damage
 
 MIN_SPEED_FACTOR = 0.25
 REFERENCE_SPEED_MPH = 250.0
@@ -135,6 +136,7 @@ def resolve_run_failure(
         failed
         and failure_type is not None
         and failure_type.failure_id not in MAJOR_FAILURE_IDS
+        and assess_incident_damage(failure_type, peak_speed_mph).damage < 60
         and can_repair_trackside(team)
     )
     return RunOutcome(failure_probability, failed, repaired, failure_type)

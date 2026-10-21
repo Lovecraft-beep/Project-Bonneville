@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from brakes import BRAKE_BY_NAME
 from chassis import CHASSIS_BY_ID
+from condition import condition_performance_factor
 from engines import AVAILABLE_ENGINES, tune_engine
 from gearbox import AVAILABLE_GEARBOXES
 from research import aerodynamics_effects
@@ -51,4 +52,15 @@ def build_vehicle_from_garage_entry(entry):
     vehicle.aerodynamics_technology = tuple(entry.aerodynamics_technology)
     if entry.engine_tune_stage:
         apply_engine_tune(vehicle, entry.engine_tune_stage)
+    factor = condition_performance_factor(entry.wear, entry.damage)
+    vehicle.engine = replace(
+        vehicle.engine,
+        power_hp=vehicle.engine.power_hp * factor,
+        torque_nm=vehicle.engine.torque_nm * factor,
+    )
+    vehicle.power = vehicle.engine.power_hp
+    vehicle.peak_torque_nm = vehicle.engine.torque_nm
+    vehicle.tyre_grip_factor *= factor
+    vehicle.brakes.efficiency *= factor
+    vehicle.condition = entry.condition
     return vehicle

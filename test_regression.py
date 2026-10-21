@@ -186,6 +186,43 @@ class TestSessionTests(unittest.TestCase):
 
 
 class RecordChaseTests(unittest.TestCase):
+    def test_header_gap_uses_the_closest_rival_not_the_world_record(self):
+        from types import SimpleNamespace
+        from ui.app import closest_rival_gap_headline
+
+        rivals = [
+            SimpleNamespace(name="Fast Leader", best_speed_mph=250.0),
+            SimpleNamespace(name="Nearest Rival", best_speed_mph=104.0),
+            SimpleNamespace(name="Slow Rival", best_speed_mph=80.0),
+        ]
+        self.assertEqual(
+            closest_rival_gap_headline(rivals, 100.0),
+            "4.0 mph behind Nearest Rival",
+        )
+        self.assertEqual(
+            closest_rival_gap_headline(rivals, 106.0),
+            "2.0 mph ahead of Nearest Rival",
+        )
+        self.assertEqual(closest_rival_gap_headline([], 100.0), "No rival speeds yet")
+
+    def test_campaign_header_displays_nearest_rival_gap(self):
+        from types import SimpleNamespace
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        campaign.best_measured_mile_speed_mph = 100.0
+        campaign.world.rivals = [
+            SimpleNamespace(name="Fast Leader", best_speed_mph=250.0),
+            SimpleNamespace(name="Nearest Rival", best_speed_mph=104.0),
+        ]
+        app = SimpleNamespace(campaign=campaign, header_status=Mock())
+
+        BonnevilleApp._refresh_header(app)
+
+        banner = app.header_status.configure.call_args.kwargs["text"]
+        self.assertIn("4.0 MPH BEHIND NEAREST RIVAL", banner)
+        self.assertNotIn("150.0 MPH SHORT", banner)
+
     def test_inaugural_attempt_runs_through_the_ui_without_a_rival_record(self):
         from ui.app import BonnevilleApp
 
@@ -628,12 +665,49 @@ class EngineTuningTests(unittest.TestCase):
         from ui.app import BonnevilleApp
 
         campaign = CampaignState()
-        entry = self._garage_entry()
+        entry = self._garage_entry(stage=1)
+        campaign.garage.vehicles.append(entry)
         app = SimpleNamespace(campaign=campaign, open_garage_vehicle=Mock())
         with patch("ui.app.save_campaign"):
             BonnevilleApp.set_engine_tune(app, entry, 2)
         self.assertEqual(campaign.engine_tune_stages, {entry.engine_name: 2})
         self.assertEqual(entry.engine_tune_stage, 2)
+
+    def test_tune_confirmation_quotes_price_and_reliability_tradeoff(self):
+        from ui.app import BonnevilleApp
+
+        app = SimpleNamespace(set_engine_tune=Mock())
+        entry = self._garage_entry()
+        with patch("ui.app.messagebox.askyesno", return_value=True) as confirm:
+            BonnevilleApp.confirm_engine_tune(app, entry, 1, 500)
+        text = confirm.call_args.args[1]
+        self.assertIn("GBP 500", text)
+        self.assertIn("Reliability penalty: -3%", text)
+        app.set_engine_tune.assert_called_once_with(entry, 1)
+
+    def test_engine_tune_costs_cash_once_per_turn_and_turn_resets_limit(self):
+        from management import apply_engine_tune, engine_tune_cost
+
+        campaign = CampaignState()
+        first = self._garage_entry()
+        second = self._garage_entry()
+        second.vehicle_name = "Another Tune Test"
+        campaign.garage.vehicles.extend((first, second))
+        cash = campaign.team.cash
+        cost = engine_tune_cost(first.engine_name, 1)
+        self.assertGreater(cost, 0)
+        self.assertEqual(apply_engine_tune(campaign, first, 1), cost)
+        self.assertEqual(campaign.team.cash, cash - cost)
+        self.assertEqual(campaign.engine_tunes_this_turn, 1)
+        with self.assertRaisesRegex(ValueError, "one engine tune"):
+            apply_engine_tune(campaign, second, 1)
+        self.assertEqual(second.engine_tune_stage, 0)
+        self.assertEqual(campaign.team.cash, cash - cost)
+        advance_turn(campaign, days=0)
+        self.assertEqual(campaign.engine_tunes_this_turn, 0)
+        next_cost = engine_tune_cost(second.engine_name, 1)
+        apply_engine_tune(campaign, second, 1)
+        self.assertEqual(campaign.team.cash, cash - cost - next_cost - 450)
 
     def test_builder_requires_explicit_reuse_and_keeps_engine_models_separate(self):
         from ui.app import BonnevilleApp
@@ -1619,6 +1693,85 @@ class ResearchProjectSetupTests(unittest.TestCase):
         self.assertGreater(campaign.team.cash, 0)
 
 class EngineeringDiagnosisTests(unittest.TestCase):
+    def test_brooklands_debrief_recommends_longer_course_if_car_is_still_accelerating(self):
+        from diagnostics import create_engineering_report, longer_track_recommendation
+        from tracks import BROOKLANDS, PENDINE_SANDS
+
+        vehicle = AVAILABLE_CARS["1"]()
+        result = SimpleNamespace(
+            completed=True,
+            wheelspin_event_count=0,
+            average_acceleration_g=0.12,
+            maximum_brake_temperature_c=100.0,
+            peak_speed_mph=100.0,
+            measured_mile_speed_mph=98.0,
+            telemetry=[SimpleNamespace(
+                time_seconds=80, phase="measured mile",
+                acceleration_g=0.08, speed_mph=100.0, brake_fade=False, gear=2,
+            )],
+        )
+        campaign = CampaignState(current_year=1908)
+        recommendation = longer_track_recommendation(vehicle, BROOKLANDS, result, campaign)
+        self.assertIn("still accelerating", recommendation)
+        report = create_engineering_report(vehicle, BROOKLANDS, result, campaign)
+        self.assertIn(PENDINE_SANDS.name, report.recommendations[-1])
+
+    def test_longer_course_advice_does_not_appear_after_terminal_speed(self):
+        from diagnostics import longer_track_recommendation
+        from gearbox import estimate_gear_limited_speed_mph, estimate_power_limited_speed_mph
+        from tracks import BROOKLANDS
+
+        vehicle = AVAILABLE_CARS["1"]()
+        terminal_speed = min(
+            estimate_gear_limited_speed_mph(vehicle),
+            estimate_power_limited_speed_mph(vehicle, vehicle.engine),
+        )
+        result = SimpleNamespace(
+            completed=True,
+            telemetry=[SimpleNamespace(
+                time_seconds=80, phase="measured mile",
+                acceleration_g=0.01, speed_mph=terminal_speed * 0.96,
+            )],
+        )
+        self.assertIsNone(
+            longer_track_recommendation(
+                vehicle, BROOKLANDS, result, CampaignState(current_year=1908)
+            )
+        )
+
+    def test_successful_official_debrief_does_not_repeat_practice_record_prompt(self):
+        from ui.app import BonnevilleApp
+
+        campaign = CampaignState()
+        campaign.official_record_mph = 30
+        report = SimpleNamespace(
+            vehicle_name="Record Car", track_name="Public Roads", run_status="COMPLETED",
+            completed=True, diagnosis=SimpleNamespace(problem="Review", evidence="Telemetry"),
+            recommendations=(), comparison="", target_assessment="Official record established.",
+            research_branch="Engine",
+        )
+        app = SimpleNamespace(
+            campaign=campaign, scroll_area=Mock(), page_title=Mock(), section=Mock(),
+            action_button=Mock(), show_page=Mock(), _offer_another_record_attempt=Mock(),
+            last_report=report, last_run_note="Completed.", last_run_is_sandbox=False,
+            last_vehicle_entry=None, last_run_outcome=None,
+            last_record_message="Official average: 30.0 mph. Record established.",
+            last_result=SimpleNamespace(
+                peak_speed_mph=35, measured_mile_speed_mph=30,
+                average_acceleration_g=0.1, average_deceleration_g=0.1,
+                maximum_brake_temperature_c=30, wheelspin_event_count=0,
+            ),
+        )
+        for official in (False, True):
+            with self.subTest(official=official):
+                app.last_run_was_record_attempt = official
+                with patch("ui.app.tk.Label") as labels:
+                    BonnevilleApp.render_team_debrief(app)
+                text = "\n".join(call.kwargs.get("text", "") for call in labels.call_args_list)
+                self.assertEqual("Make it official with a record attempt" in text, not official)
+                if official:
+                    self.assertIn("Official average: 30.0 mph", text)
+
     def test_campaign_runs_open_debrief_and_failed_runs_do_not_save_records(self):
         from reliability import MISFIRE, RunOutcome
         from ui.app import BonnevilleApp
@@ -1641,6 +1794,11 @@ class EngineeringDiagnosisTests(unittest.TestCase):
                     offer_end_turn_after_failure=Mock(),
                 )
                 outcome = RunOutcome(0.25, failed, False, MISFIRE if failed else None)
+                entry = GarageVehicle(
+                    vehicle.name, "improvised_chassis", PIONEER_SINGLE_CYLINDER.name,
+                    "2-Speed Transmission", "Wooden block brakes",
+                )
+                app.campaign.garage.vehicles.append(entry)
                 with (
                     patch("ui.app.build_vehicle_from_garage_entry", return_value=vehicle),
                     patch("ui.app.messagebox.askyesno", return_value=True),
@@ -1651,7 +1809,7 @@ class EngineeringDiagnosisTests(unittest.TestCase):
                     patch("ui.app.create_record"),
                     patch("ui.app.save_record") as save_record,
                 ):
-                    BonnevilleApp.execute_run(app, object(), PUBLIC_ROADS)
+                    BonnevilleApp.execute_run(app, entry, PUBLIC_ROADS)
                 app.show_page.assert_called_once_with("Team Debrief")
                 app.advance_campaign_turn.assert_not_called()
                 self.assertEqual(app.campaign.tests_this_session, 1)
@@ -1777,6 +1935,7 @@ class EngineeringDiagnosisTests(unittest.TestCase):
         self.assertIn("Schedule an official", test_report.target_assessment)
         record_report = self._report(CampaignState(), target=target, is_record_attempt=True)
         self.assertIn("benchmark beaten", record_report.target_assessment)
+        self.assertIn("faster official mark", record_report.recommendations[-1])
 
     def _diagnose(self, vehicle, **result_values):
         result_data = {
@@ -2204,7 +2363,7 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         self.assertEqual(objective.kind, "development")
         self.assertIsNone(objective.turns_remaining)
 
-    def test_missed_deadline_sponsor_withdraws_for_good(self):
+    def test_missed_deadline_sponsor_can_return_after_one_turn(self):
         campaign = CampaignState(current_year=1908)
         campaign.team.reputation = 10.0
         sign_sponsor(campaign, "shell")
@@ -2220,6 +2379,18 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         self.assertEqual(campaign.sponsorship.income_per_turn_gbp, 0)
         with self.assertRaisesRegex(ValueError, "withdrawn"):
             sign_sponsor(campaign, "shell")
+        advance_turn(campaign, days=0)
+        self.assertNotIn("shell", campaign.sponsorship.departed_sponsors)
+        self.assertEqual(campaign.sponsorship.recent_departures, [])
+        from sponsors import available_sponsors, SPONSOR_BY_ID
+
+        self.assertIn(SPONSOR_BY_ID["shell"], available_sponsors(
+            campaign.team.reputation, campaign.sponsorship.active_sponsors,
+            campaign.sponsorship.departed_sponsors,
+        ))
+        sign_sponsor(campaign, "shell")
+        self.assertIn("shell", campaign.sponsorship.active_sponsors)
+        self.assertEqual(campaign.sponsorship.objective_for("shell").turns_remaining, 3)
 
     def test_sponsor_objectives_survive_save_and_load(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -2,12 +2,14 @@
 
 import json
 import uuid
+from math import ceil
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from brakes import BRAKE_BY_NAME, available_brakes
 from chassis import CHASSIS_BY_ID
+from condition import assess_incident_damage, condition_state
 from diagnostics import reset_vehicle_log
 from engines import AVAILABLE_ENGINES
 from campaign_world import (
@@ -66,6 +68,8 @@ WORKSHOP_UPGRADE_BASE_COST_GBP = 10_000.0
 TRACKSIDE_ADJUSTMENT_COST_GBP = 5.0
 MAX_TESTS_PER_SESSION = 8
 MAX_RECORD_RUNS_PER_SESSION = 8
+WAR_TIME_PAUSES = ((1914, 1918, 1919), (1939, 1946, 1947))
+ENGINE_TUNE_COST_FACTORS = {1: 0.05, 2: 0.10, 3: 0.15}
 DEVELOPMENT_PROGRAMS = {
     "aerodynamic_pioneer": {
         "name": "Aerodynamic Pioneer",
@@ -255,6 +259,30 @@ class GarageVehicle:
     gearbox_final_drive: float | None = None
     engine_tune_stage: int = 0
     tyre_grip_factor: float | None = None
+    wear: float = 0.0
+    damage: float = 0.0
+    last_incident: str = ""
+    workshop_action: str = ""
+    workshop_turns_total: int = 0
+    workshop_turns_remaining: int = 0
+
+    @property
+    def condition(self):
+        return condition_state(self.wear, self.damage)
+
+
+def apply_vehicle_run_condition(campaign, entry, peak_speed_mph, outcome):
+    entry.wear = round(min(100.0, entry.wear + 0.25 * (1.0 + max(0.0, peak_speed_mph) / 400.0)), 3)
+    if not outcome.failed:
+        return f"Condition: {entry.condition} / wear {entry.wear:.1f}% / damage {entry.damage:.1f}%"
+    incident = assess_incident_damage(outcome.failure_type, peak_speed_mph)
+    entry.damage = round(min(100.0, entry.damage + incident.damage), 2)
+    reputation_loss = 5.0 if entry.condition == "Destroyed" else 3.0 if entry.condition == "Heavily Damaged" else 0.0
+    campaign.team.reputation = round(max(0.0, campaign.team.reputation - reputation_loss), 2)
+    entry.last_incident = f"{incident.description}. Condition: {entry.condition}."
+    if reputation_loss:
+        entry.last_incident += f" Reputation -{reputation_loss:.0f}."
+    return entry.last_incident
 
 
 @dataclass
@@ -325,6 +353,7 @@ class CampaignState:
     current_day_of_year: int = 1
     development_programs: dict[str, str] = field(default_factory=dict)
     engine_tune_stages: dict[str, int] = field(default_factory=dict)
+    engine_tunes_this_turn: int = 0
     turn_number: int = 1
     tests_this_session: int = 0
     record_runs_this_session: int = 0
@@ -707,6 +736,7 @@ def check_sponsor_objectives(campaign, measured_mile_speed_mph=None):
 def _expire_sponsor_objectives(campaign):
     sponsorship = campaign.sponsorship
     sponsorship.recent_departures = []
+    sponsorship.departed_sponsors = []
     for objective in list(sponsorship.objectives):
         if objective.turns_remaining is None:
             continue
@@ -739,7 +769,10 @@ def complete_failed_run(campaign, run_cost_gbp):
 
 
 def advance_turn(campaign, days=None):
-    """Advance one season by default, progressing research and rival attempts."""
+    """Advance a season, fast-forwarding over wartime pauses in record activity."""
+    automatic_season_advance = days is None
+    previous_year = campaign.current_year
+    previous_season_index = campaign.season_index
     if days is None:
         next_season_day = (
             SEASON_START_DAYS[campaign.season_index + 1]
@@ -747,39 +780,86 @@ def advance_turn(campaign, days=None):
             else 366
         )
         days = next_season_day - campaign.current_day_of_year
-    campaign.team.cash = campaign.projected_next_turn_cash_gbp
-    campaign.turn_number += 1
-    campaign.tests_this_session = 0
-    campaign.record_runs_this_session = 0
-    campaign.workshop_repair_pending = False
-    campaign.venues_paid_this_session = []
     elapsed_days = campaign.current_day_of_year - 1 + days
-    campaign.current_year += elapsed_days // 365
-    campaign.current_day_of_year = elapsed_days % 365 + 1
-    completed_projects = []
-    for project in campaign.engineering_projects:
-        project.turns_remaining -= 1
-        if project.turns_remaining <= 0:
-            _complete_engineering_project(campaign, project)
-            completed_projects.append(project.technology_id)
-    if completed_projects:
-        campaign.engineering_projects = [
-            project
-            for project in campaign.engineering_projects
-            if project.technology_id not in completed_projects
-        ]
-    completed_vehicles = []
-    for construction in campaign.vehicle_construction:
-        construction.turns_remaining -= 1
-        if construction.turns_remaining <= 0:
-            campaign.garage.vehicles.append(construction.vehicle)
-            completed_vehicles.append(construction.vehicle.vehicle_name)
-    campaign.vehicle_construction = [
-        construction
-        for construction in campaign.vehicle_construction
-        if construction.turns_remaining > 0
-    ]
+    target_year = campaign.current_year + elapsed_days // 365
+    target_day = elapsed_days % 365 + 1
+    wartime_pause = None
+    if automatic_season_advance:
+        for war_start, war_end, resume_year in WAR_TIME_PAUSES:
+            if war_start <= target_year <= war_end:
+                wartime_pause = (war_start, war_end, resume_year)
+                target_year = resume_year
+                target_day = 1
+                break
+    campaign.current_year = target_year
+    campaign.current_day_of_year = target_day
+    elapsed_seasons = max(
+        1,
+        (campaign.current_year - previous_year) * len(SEASONS)
+        + campaign.season_index - previous_season_index,
+    )
     advance_world(campaign)
+    completed_projects = []
+    completed_vehicles = []
+    completed_workshop_jobs = []
+    sponsor_messages = []
+    departed_during_skip = set()
+    for _ in range(elapsed_seasons):
+        campaign.team.cash = campaign.projected_next_turn_cash_gbp
+        campaign.turn_number += 1
+        campaign.tests_this_session = 0
+        campaign.record_runs_this_session = 0
+        campaign.engine_tunes_this_turn = 0
+        campaign.workshop_repair_pending = False
+        campaign.venues_paid_this_session = []
+
+        turn_completions = []
+        turn_vehicles = []
+        for project in campaign.engineering_projects:
+            project.turns_remaining -= 1
+            if project.turns_remaining <= 0:
+                _complete_engineering_project(campaign, project)
+                turn_completions.append(project.technology_id)
+        completed_projects.extend(turn_completions)
+        if turn_completions:
+            campaign.engineering_projects = [
+                project for project in campaign.engineering_projects
+                if project.technology_id not in turn_completions
+            ]
+
+        for construction in campaign.vehicle_construction:
+            construction.turns_remaining -= 1
+            if construction.turns_remaining <= 0:
+                campaign.garage.vehicles.append(construction.vehicle)
+                turn_vehicles.append(construction.vehicle.vehicle_name)
+        completed_vehicles.extend(turn_vehicles)
+        campaign.vehicle_construction = [
+            construction for construction in campaign.vehicle_construction
+            if construction.turns_remaining > 0
+        ]
+
+        for entry in campaign.garage.vehicles:
+            if entry.workshop_turns_remaining <= 0:
+                continue
+            entry.workshop_turns_remaining -= 1
+            if entry.workshop_turns_remaining == 0:
+                completed_workshop_jobs.append((entry.vehicle_name, entry.workshop_action))
+                entry.wear = 0.0
+                entry.damage = 0.0
+                entry.workshop_action = ""
+                entry.workshop_turns_total = 0
+
+        milestones = len(turn_completions) + len(turn_vehicles)
+        campaign.completed_development_milestones += milestones
+        sponsor_messages.extend(check_sponsor_objectives(campaign))
+        _expire_sponsor_objectives(campaign)
+        departed_during_skip.update(campaign.sponsorship.recent_departures)
+
+    if wartime_pause:
+        campaign.world.headlines.append(
+            f"WARTIME STAND-DOWN: campaign advanced {previous_year}-{wartime_pause[1]}; "
+            f"record activity resumes in {wartime_pause[2]}."
+        )
     if campaign.team.cash < 0:
         campaign.world.headlines.append(
             f"PAYROLL WARNING: cash deficit GBP {-campaign.team.cash:,.0f}. "
@@ -793,11 +873,16 @@ def advance_turn(campaign, days=None):
         campaign.world.headlines.append(
             f"RESEARCH COMPLETE: {TECHNOLOGY_NAME_BY_ID[technology_id]} is now available to the team."
         )
-    campaign.completed_development_milestones += len(completed_projects) + len(completed_vehicles)
-    for message in check_sponsor_objectives(campaign):
+    for vehicle_name, action in completed_workshop_jobs:
+        campaign.world.headlines.append(
+            f"WORKSHOP COMPLETE: {vehicle_name} {action.lower()} finished; condition Pristine."
+        )
+    for name in sorted(departed_during_skip):
+        if name not in campaign.sponsorship.recent_departures:
+            campaign.sponsorship.recent_departures.append(name)
+    for message in sponsor_messages:
         campaign.world.headlines.append(message)
     del campaign.world.headlines[:-8]
-    _expire_sponsor_objectives(campaign)
     return tuple(completed_projects)
 
 
@@ -1017,7 +1102,7 @@ def sign_sponsor(campaign, sponsor_id):
     if campaign.sponsorship.has_sponsor(sponsor_id):
         raise ValueError(f"{sponsor.name} has already been signed")
     if sponsor_id in campaign.sponsorship.departed_sponsors:
-        raise ValueError(f"{sponsor.name} has withdrawn and will not return")
+        raise ValueError(f"{sponsor.name} has withdrawn for this turn; negotiations reopen next turn")
     if campaign.team.reputation < sponsor.reputation_required:
         raise ValueError(f"not enough reputation to sign {sponsor.name}")
 
@@ -1045,6 +1130,38 @@ def hire_engineer(campaign):
 
     campaign.team.cash = round(campaign.team.cash - ENGINEER_HIRE_COST_GBP, 2)
     campaign.team.engineers += 1
+
+
+def engine_tune_cost(engine_name, stage):
+    engine = AVAILABLE_ENGINES[engine_name]
+    factor = ENGINE_TUNE_COST_FACTORS.get(stage)
+    if factor is None:
+        raise ValueError("invalid engine tune stage")
+    return max(100, round(engine.purchase_cost_gbp * factor / 100) * 100)
+
+
+def apply_engine_tune(campaign, garage_entry, stage):
+    if campaign.record_attempt is not None:
+        raise ValueError("finish the official record attempt before tuning")
+    reason = vehicle_unavailable_reason(garage_entry)
+    if reason:
+        raise ValueError(reason)
+    if not any(entry is garage_entry for entry in campaign.garage.vehicles):
+        raise ValueError("vehicle is not in the active garage")
+    if campaign.engine_tunes_this_turn >= 1:
+        raise ValueError("only one engine tune can be applied per turn")
+    if stage != garage_entry.engine_tune_stage + 1:
+        raise ValueError("engine tuning must advance exactly one stage")
+    cost = engine_tune_cost(garage_entry.engine_name, stage)
+    if campaign.team.cash < cost:
+        raise ValueError("insufficient funds for engine tuning")
+    campaign.team.cash = round(campaign.team.cash - cost, 2)
+    garage_entry.engine_tune_stage = stage
+    campaign.engine_tune_stages[garage_entry.engine_name] = max(
+        stage, campaign.engine_tune_stages.get(garage_entry.engine_name, 0)
+    )
+    campaign.engine_tunes_this_turn += 1
+    return cost
 
 
 def hire_mechanic(campaign):
@@ -1096,6 +1213,8 @@ def dismiss_engineer(campaign, specialty=None):
 def dismiss_mechanic(campaign, experienced=False):
     if campaign.record_attempt is not None:
         raise ValueError("finish the official attempt before releasing staff")
+    if campaign.team.mechanics <= 1 and any(entry.workshop_turns_remaining > 0 for entry in campaign.garage.vehicles):
+        raise ValueError("retain a mechanic until workshop jobs are complete")
     if experienced:
         if campaign.team.experienced_mechanics <= 0:
             raise ValueError("no experienced mechanic to release")
@@ -1130,6 +1249,57 @@ def vehicle_construction_complexity(garage_entry):
     eras = [node.era for node in technology_nodes if node is not None]
     eras.append(era_for_year(BRAKE_BY_NAME[garage_entry.brakes_name].introduced_year).name)
     return 1 + max(ERA_ORDER.index(era) for era in eras)
+
+
+def vehicle_replacement_cost(entry):
+    return round(
+        CHASSIS_BY_ID[entry.chassis_id].cost_gbp
+        + AVAILABLE_ENGINES[entry.engine_name].purchase_cost_gbp
+        + AVAILABLE_GEARBOXES[entry.gearbox_name].cost_gbp
+        + BRAKE_BY_NAME[entry.brakes_name].cost_gbp
+    )
+
+
+def vehicle_workshop_quote(entry):
+    base_cost = vehicle_replacement_cost(entry)
+    complexity = vehicle_construction_complexity(entry)
+    if entry.condition == "Destroyed":
+        return "Rebuild", base_cost, complexity
+    if entry.condition == "Heavily Damaged":
+        return "Major repair", round(base_cost * 0.65), max(1, ceil(complexity * 0.75))
+    if entry.condition == "Damaged":
+        return "Repair", round(base_cost * 0.30), max(1, ceil(complexity * 0.5))
+    return "Service", round(base_cost * 0.08), max(1, ceil(complexity * 0.25))
+
+
+def vehicle_unavailable_reason(entry):
+    if entry.workshop_turns_remaining > 0:
+        return f"{entry.workshop_action} in progress: {entry.workshop_turns_remaining} turn(s) remaining."
+    if entry.condition == "Destroyed":
+        return "Vehicle destroyed: a paid rebuild is required before another run."
+    if entry.condition == "Heavily Damaged":
+        return "Vehicle heavily damaged: workshop repair is required before another run."
+    return None
+
+
+def start_vehicle_workshop_job(campaign, entry):
+    _require_active_garage_vehicle(campaign, entry, require_ready=False)
+    if campaign.record_attempt is not None:
+        raise ValueError("finish or abandon the official attempt before workshop work")
+    if entry.workshop_turns_remaining > 0:
+        raise ValueError("this vehicle already has workshop work in progress")
+    if entry.wear <= 0 and entry.damage <= 0:
+        raise ValueError("this vehicle does not need servicing")
+    if campaign.team.mechanics < 1:
+        raise ValueError("at least one mechanic is required for workshop work")
+    action, cost, turns = vehicle_workshop_quote(entry)
+    if campaign.team.cash < cost:
+        raise ValueError("insufficient funds for workshop work")
+    campaign.team.cash = round(campaign.team.cash - cost, 2)
+    entry.workshop_action = action
+    entry.workshop_turns_total = turns
+    entry.workshop_turns_remaining = turns
+    return action, cost, turns
 
 
 def build_vehicle(campaign, garage_entry, cost_gbp, vehicle=None):
@@ -1170,9 +1340,13 @@ def _charge_trackside_adjustment(campaign):
     )
 
 
-def _require_active_garage_vehicle(campaign, garage_entry):
+def _require_active_garage_vehicle(campaign, garage_entry, require_ready=True):
     if not any(vehicle is garage_entry for vehicle in campaign.garage.vehicles):
         raise ValueError("vehicle is not in the active garage")
+    if require_ready:
+        reason = vehicle_unavailable_reason(garage_entry)
+        if reason:
+            raise ValueError(reason)
 
 
 def adjust_vehicle_ratio_trackside(campaign, garage_entry, gear_index, delta):
@@ -1241,6 +1415,8 @@ def fit_trackside_brakes(campaign, garage_entry, brakes_name, current_year):
 
 def retire_vehicle(campaign, garage_entry):
     """Move an active garage vehicle into the team's museum."""
+    if garage_entry.workshop_turns_remaining > 0:
+        raise ValueError("finish workshop work before retiring this vehicle")
     vehicle_index = next(
         (
             index

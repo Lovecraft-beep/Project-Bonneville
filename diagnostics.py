@@ -6,7 +6,10 @@ from datetime import datetime
 from math import pi
 from pathlib import Path
 
-from gearbox import estimate_power_limited_speed_mph
+from gearbox import (
+    estimate_gear_limited_speed_mph,
+    estimate_power_limited_speed_mph,
+)
 from research import (
     AERODYNAMICS_TECHNOLOGY_TREE,
     BRAKE_TECHNOLOGY_TREE,
@@ -16,6 +19,7 @@ from research import (
     TECHNOLOGY_NAME_BY_ID,
     available_branch_technologies,
 )
+from tracks import available_tracks
 
 DIAGNOSTIC_LOG_FILE = Path(__file__).with_name("test_vehicle_diagnostics.log")
 
@@ -239,6 +243,44 @@ class EngineeringReport:
     target_assessment: str
 
 
+def longer_track_recommendation(vehicle, track, result, campaign):
+    """Suggest a longer venue when telemetry shows the car still accelerating."""
+    telemetry = getattr(result, "telemetry", ())
+    if not getattr(result, "completed", True) or not telemetry:
+        return None
+    if any(
+        not hasattr(sample, "acceleration_g") or not hasattr(sample, "speed_mph")
+        for sample in telemetry
+    ):
+        return None
+    acceleration_samples = [
+        sample for sample in telemetry
+        if getattr(sample, "phase", "accelerating") != "decelerating"
+    ]
+    if not acceleration_samples:
+        return None
+    final_sample = acceleration_samples[-1]
+    terminal_speed = min(
+        estimate_power_limited_speed_mph(vehicle, vehicle.engine),
+        estimate_gear_limited_speed_mph(vehicle),
+    )
+    if final_sample.acceleration_g < 0.02 or final_sample.speed_mph >= terminal_speed * 0.95:
+        return None
+    tracks = available_tracks(campaign.current_year if campaign is not None else None).values()
+    longer_tracks = sorted(
+        (candidate for candidate in tracks if candidate.length_miles > track.length_miles),
+        key=lambda candidate: candidate.length_miles,
+    )
+    if not longer_tracks:
+        return None
+    recommended_track = longer_tracks[0]
+    return (
+        f"The car was still accelerating at {final_sample.speed_mph:.1f} mph "
+        f"before braking, below its estimated {terminal_speed:.1f} mph terminal speed. "
+        f"Try a longer course such as {recommended_track.name} ({recommended_track.length_miles:g} miles)."
+    )
+
+
 def _research_recommendation(campaign, branch, tree):
     if campaign is None:
         return f"Explore {branch.lower()} research in the campaign workshop."
@@ -304,6 +346,12 @@ def create_engineering_report(
     recommendations = (
         _research_recommendation(campaign, branch, tree), modification, next_test,
     )
+    track_recommendation = (
+        None if failed or campaign is None
+        else longer_track_recommendation(vehicle, track, result, campaign)
+    )
+    if track_recommendation:
+        recommendations = (recommendations[0], modification, track_recommendation)
     if failed:
         recommendations = (
             "Inspect the failed component and review team mechanics and workshop support.",
@@ -352,6 +400,16 @@ def create_engineering_report(
                 target_assessment = f"Historical benchmark beaten: {benchmark}."
             else:
                 target_assessment = f"Test pace meets {benchmark}. Schedule an official record attempt."
+            target_met = (
+                assessed_speed > target.speed_mph
+                if getattr(target, "record_id", None) in {"team_record", "inaugural_record"}
+                else assessed_speed >= target.speed_mph
+            )
+            if is_record_attempt and target_met and not record_attempt_in_progress:
+                recommendations = (
+                    recommendations[0], recommendations[1],
+                    "Review vehicle condition and plan development for a faster official mark.",
+                )
     return EngineeringReport(
         vehicle.name, track.name, diagnosis, recommendations, branch,
         "ABORTED / SIMULATION ESTIMATES ONLY" if failed else "COMPLETED",
