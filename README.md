@@ -61,15 +61,15 @@ and the best measured-mile speed in `campaign_state.json`.
 
 Campaign management is represented by a `Team` with a name, cash balance,
 reputation, engineers, mechanics, and workshop level. Staff draw wages every
-seasonal turn, including idle turns. The starting team (one standard engineer
-and two standard mechanics) costs GBP 450 per turn.
+half-year turn, including idle phases. The starting team (one standard engineer
+and two standard mechanics) costs GBP 900 per half-year.
 
-| Staff | Recruitment | Wages Per Turn | Effect |
+| Staff | Recruitment | Wages Per Half-Year | Effect |
 | --- | --- | --- | --- |
-| Standard engineer | GBP 8,000 | GBP 250 | One engineer slot for research |
-| Specialist engineer | GBP 16,000 | GBP 650 | One slot; matching research finishes one turn sooner |
-| Standard mechanic | GBP 5,000 | GBP 100 | Standard reliability and repair contribution |
-| Experienced mechanic | GBP 10,000 | GBP 250 | Double mechanic skill contribution and minor-repair coverage |
+| Standard engineer | GBP 8,000 | GBP 500 | One engineer slot for research |
+| Specialist engineer | GBP 16,000 | GBP 1,300 | One slot; matching research finishes one turn sooner |
+| Standard mechanic | GBP 5,000 | GBP 200 | Standard reliability and repair contribution |
+| Experienced mechanic | GBP 10,000 | GBP 500 | Double mechanic skill contribution and minor-repair coverage |
 
 Specialists are hired for engines, aerodynamics, chassis, gearboxes, tyres, or
 brakes. Projects reserve their staff until completion. One matching specialist
@@ -81,7 +81,7 @@ One experienced mechanic provides the minor-repair coverage of two standard
 mechanics, but an engineer is still required. Major failures still require the
 workshop. The usual reliability skill cap remains in effect.
 
-Team and Dashboard show payroll, net seasonal cash flow, and projected next-turn
+Team and Dashboard show payroll, net half-year cash flow, and projected next-turn
 cash. Recruitment confirmation includes the new wages and post-hire forecast.
 Idle staff can be released without a recruitment refund; assigned engineers
 cannot be released, and at least one engineer must remain. Staff quality and
@@ -116,17 +116,19 @@ time are saved with the campaign, and assigned engineers become available again
 at completion. The research screen shows cost, staffing, duration, prerequisites,
 and current progress before a project is started.
 
-The campaign starts in Spring 1895 and uses four seasonal turns per year:
-Spring, Summer, Autumn, Winter, then Spring of the next year. Only **End turn**
-advances the season; research, management actions, and runs do not advance time.
-Each seasonal turn pays sponsor income and staff wages, progresses research and
-vehicle construction, updates rival attempts, and resets the test and record
-sessions. Seasons provide the calendar foundation for future weather effects;
-weather is not yet simulated.
+The campaign starts in the Development season of 1895 and uses two turns per
+year: **Development** and **Competition**. Only **End turn** advances the
+campaign. Testing and official record attempts are limited to Competition;
+research, construction, recruitment, tuning, and workshop work are limited to
+Development. Each half-year turn pays sponsor income and staff wages, progresses
+research and vehicle construction, and updates rival attempts. Tests and record
+sessions are available only during Competition. The two annual phases provide
+the calendar foundation for future weather effects; weather is not yet simulated.
 
-End Turn fast-forwards from dates in 1914-1918 to Spring 1919, and from dates in
-1939-1946 to Spring 1947, reflecting the pause in record-breaking activity.
-Every elapsed season still counts for payroll, sponsor deadlines, research,
+End Turn fast-forwards from dates in 1914-1918 to the Development season of
+1919, and from dates in 1939-1946 to the Development season of 1947, reflecting
+the pause in record-breaking activity.
+Every elapsed half-year still counts for payroll, sponsor deadlines, research,
 vehicle construction, workshop work, and campaign turn numbering. Historical
 rival attempts are processed through the resumed date; no player records or test
 runs are invented during the pause.
@@ -195,14 +197,14 @@ latest incident assessment are visible in the Garage and team debrief.
 Choose one major development program per era before starting that era's
 engineering projects. The choice is permanent for that era:
 
-- **Aerodynamic Pioneer:** Aero projects cost 20% less and finish one season
-  sooner; engine projects cost 25% more and take one extra season.
-- **Horsepower Gambler:** Engine projects cost 20% less and finish one season
-  sooner; aero projects cost 25% more and take one extra season. Run failure risk
+- **Aerodynamic Pioneer:** Aero projects cost 20% less and finish one half-year turn
+  sooner; engine projects cost 25% more and take one extra half-year turn.
+- **Horsepower Gambler:** Engine projects cost 20% less and finish one half-year turn
+  sooner; aero projects cost 25% more and take one extra half-year turn. Run failure risk
   rises by 15%.
 - **Engineering Perfectionist:** Chassis, gearbox, tyre, and brake projects cost
-  20% less and finish one season sooner. Engine and aero projects cost 25% more
-  and take one extra season; run failure risk falls by 25%.
+  20% less and finish one half-year turn sooner. Engine and aero projects cost 25% more
+  and take one extra half-year turn; run failure risk falls by 25%.
 
 The next era opens a new choice. Unchosen research remains available, but its
 projects may take longer and cost more under the selected program.
@@ -210,7 +212,7 @@ projects may take longer and cost more under the selected program.
 Only aerodynamics research is otherwise available at the start of a new
 campaign. Its base project times are:
 
-| Project | Required completed research | Base turn advances to complete |
+| Project | Required completed research | Base half-year turns to complete |
 | --- | --- | --- |
 | Wind Deflector | None | 3 |
 | Wheel Fairings / Spats | Wind Deflector | 3 |
@@ -225,12 +227,13 @@ Completing Carriage Frame then unlocks these projects in their respective tabs:
 - **Tyres:** Pneumatic Racing Tyres
 - **Brakes:** Mechanical Drum Brakes
 
-Under Aerodynamic Pioneer, the first three aero projects each take two seasonal
-turns, so Carriage Frame becomes available after six turn advances. It then takes
-three turns under that program, completing in Summer 1897 when started as soon
-as it unlocks. Starting a project does not advance time; **End turn** progresses
-active projects by one season. Research becomes available through completed
-prerequisites, not merely by reaching a particular calendar year.
+Under Aerodynamic Pioneer, the first three aero projects each take two half-year
+turns, so Carriage Frame becomes available after six turns, in Development 1898.
+It then takes three turns under that program, completing in Competition 1899
+when started as soon as it unlocks. Starting a project does not advance time;
+**End turn** progresses active projects by one half-year. Research becomes
+available through completed prerequisites, not merely by reaching a particular
+calendar year.
 
 The starting team has one engineer, and each opening project reserves that
 engineer until completion, so only one can run at a time. Later projects may
@@ -368,7 +371,7 @@ saved tuning setup; it does not remove a physical engine from another car or
 change component purchase pricing. Applying a new tune step costs 5%, 10%, or
 15% of the stock engine's purchase price for stages 1, 2, and 3 respectively,
 rounded to GBP 100 with a GBP 100 minimum. Only one tune step can be applied
-across the entire team each seasonal turn; **End turn** resets the limit. The
+across the entire team each half-year turn; **End turn** resets the limit. The
 Garage quotes the charge and reliability penalty before confirmation. Reusing
 an already developed model tune does not incur a second tuning charge. Gearbox
 ratio adjustment rules are unchanged.
@@ -388,8 +391,12 @@ The current `Vehicle` class accepts:
 | `mass` | kg | Vehicle mass |
 | `cd` | - | Aerodynamic drag coefficient |
 | `area` | m^2 | Frontal area |
-| `tyre_grip_factor` | - | Tyre capability to transmit engine force |
-| `wheel_radius_m` | m | Radius used to convert wheel torque to force |
+Speed-focused sponsors retain their timed measured-mile objectives and
+withdrawal rules. Their three-turn deadlines now span 18 months. Missing a
+deadline withdraws support for one turn, not permanently. The Team screen shows
+a temporary notice; after the next End Turn, the notice clears and negotiations
+reopen under the normal reputation rules. The Team screen and Dashboard
+distinguish ongoing technical partnerships from those timed commitments.
 
 Each vehicle must reference an `Engine` and a `Gearbox`. Engine power and
 torque are derived from the selected engine; gear ratios, final drive,

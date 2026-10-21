@@ -53,17 +53,17 @@ SPONSOR_DEPARTURE_REPUTATION_LOSS = 1.0
 CAMPAIGN_FILE = Path(__file__).with_name("campaign_state.json")
 STARTING_FUNDS_GBP = 100_000.0
 STARTING_YEAR = 1895
-SEASONS = ("Spring", "Summer", "Autumn", "Winter")
-SEASON_START_DAYS = (1, 92, 183, 274)
+SEASONS = ("Development", "Competition")
+SEASON_START_DAYS = (1, 183)
 DEFAULT_TEAM_NAME = "Bonneville Racing Team"
 ENGINEER_HIRE_COST_GBP = 8_000.0
 MECHANIC_HIRE_COST_GBP = 5_000.0
-ENGINEER_WAGE_GBP = 250.0
-MECHANIC_WAGE_GBP = 100.0
+ENGINEER_WAGE_GBP = 500.0
+MECHANIC_WAGE_GBP = 200.0
 SPECIALIST_HIRE_COST_GBP = 16_000.0
-SPECIALIST_WAGE_GBP = 650.0
+SPECIALIST_WAGE_GBP = 1_300.0
 EXPERIENCED_MECHANIC_HIRE_COST_GBP = 10_000.0
-EXPERIENCED_MECHANIC_WAGE_GBP = 250.0
+EXPERIENCED_MECHANIC_WAGE_GBP = 500.0
 WORKSHOP_UPGRADE_BASE_COST_GBP = 10_000.0
 TRACKSIDE_ADJUSTMENT_COST_GBP = 5.0
 MAX_TESTS_PER_SESSION = 8
@@ -94,6 +94,16 @@ DEVELOPMENT_PROGRAMS = {
     },
 }
 DEVELOPMENT_PROGRAM_COST_FACTORS = {"preferred": 0.8, "penalized": 1.25}
+
+
+def require_development_season(campaign):
+    if campaign.current_season != "Development":
+        raise ValueError("this action is available during the Development season")
+
+
+def require_competition_season(campaign):
+    if campaign.current_season != "Competition":
+        raise ValueError("campaign testing and record attempts open during the Competition season")
 
 
 @dataclass
@@ -888,6 +898,7 @@ def advance_turn(campaign, days=None):
 
 def register_test_run(campaign):
     """Record one hourly campaign test, enforcing the session limit."""
+    require_competition_season(campaign)
     if campaign.tests_this_session >= MAX_TESTS_PER_SESSION:
         raise ValueError("test session is full; end the turn to start another")
     campaign.tests_this_session += 1
@@ -896,6 +907,7 @@ def register_test_run(campaign):
 
 def register_record_run(campaign):
     """Record one official record pass against this turn's record session."""
+    require_competition_season(campaign)
     if campaign.record_runs_this_session >= MAX_RECORD_RUNS_PER_SESSION:
         raise ValueError("record session is full; end the turn to start another")
     campaign.record_runs_this_session += 1
@@ -991,6 +1003,7 @@ def _project_specialists(campaign, branch, engineers_required):
 
 def start_engineering_project(campaign, branch, technology_id):
     """Fund a technology project and reserve its required engineering staff."""
+    require_development_season(campaign)
     branch = branch.lower()
     branch_data = _ENGINEERING_PROJECT_BRANCHES.get(branch)
     if branch_data is None:
@@ -1067,6 +1080,7 @@ def engineering_project_terms(campaign, branch, technology):
 
 def select_development_program(campaign, program_id):
     """Commit the team to one major program for the current historical era."""
+    require_development_season(campaign)
     if program_id not in DEVELOPMENT_PROGRAMS:
         raise ValueError(f"unknown development program: {program_id}")
     era = campaign.current_era
@@ -1096,6 +1110,7 @@ def _complete_engineering_project(campaign, project):
 
 def sign_sponsor(campaign, sponsor_id):
     """Sign a sponsor, banking its signing bonus once reputation allows it."""
+    require_development_season(campaign)
     sponsor = SPONSOR_BY_ID.get(sponsor_id)
     if sponsor is None:
         raise ValueError(f"unknown sponsor: {sponsor_id}")
@@ -1125,6 +1140,7 @@ def calculate_workshop_upgrade_cost(team):
 
 def hire_engineer(campaign):
     """Spend cash to add an engineer to the team."""
+    require_development_season(campaign)
     if campaign.team.cash < ENGINEER_HIRE_COST_GBP:
         raise ValueError("insufficient funds to hire an engineer")
 
@@ -1141,6 +1157,7 @@ def engine_tune_cost(engine_name, stage):
 
 
 def apply_engine_tune(campaign, garage_entry, stage):
+    require_development_season(campaign)
     if campaign.record_attempt is not None:
         raise ValueError("finish the official record attempt before tuning")
     reason = vehicle_unavailable_reason(garage_entry)
@@ -1166,6 +1183,7 @@ def apply_engine_tune(campaign, garage_entry, stage):
 
 def hire_mechanic(campaign):
     """Spend cash to add a mechanic to the team."""
+    require_development_season(campaign)
     if campaign.team.cash < MECHANIC_HIRE_COST_GBP:
         raise ValueError("insufficient funds to hire a mechanic")
 
@@ -1174,6 +1192,7 @@ def hire_mechanic(campaign):
 
 
 def hire_specialist_engineer(campaign, specialty):
+    require_development_season(campaign)
     if specialty not in _ENGINEERING_PROJECT_BRANCHES:
         raise ValueError("unknown engineering specialty")
     if campaign.team.cash < SPECIALIST_HIRE_COST_GBP:
@@ -1184,6 +1203,7 @@ def hire_specialist_engineer(campaign, specialty):
 
 
 def hire_experienced_mechanic(campaign):
+    require_development_season(campaign)
     if campaign.team.cash < EXPERIENCED_MECHANIC_HIRE_COST_GBP:
         raise ValueError("insufficient funds to hire an experienced mechanic")
     campaign.team.cash = round(campaign.team.cash - EXPERIENCED_MECHANIC_HIRE_COST_GBP, 2)
@@ -1192,6 +1212,7 @@ def hire_experienced_mechanic(campaign):
 
 
 def dismiss_engineer(campaign, specialty=None):
+    require_development_season(campaign)
     if campaign.record_attempt is not None:
         raise ValueError("finish the official attempt before releasing staff")
     if campaign.team.engineers <= 1:
@@ -1211,6 +1232,7 @@ def dismiss_engineer(campaign, specialty=None):
 
 
 def dismiss_mechanic(campaign, experienced=False):
+    require_development_season(campaign)
     if campaign.record_attempt is not None:
         raise ValueError("finish the official attempt before releasing staff")
     if campaign.team.mechanics <= 1 and any(entry.workshop_turns_remaining > 0 for entry in campaign.garage.vehicles):
@@ -1225,6 +1247,7 @@ def dismiss_mechanic(campaign, experienced=False):
 
 
 def upgrade_workshop(campaign):
+    require_development_season(campaign)
     """Spend cash to raise the workshop level."""
     cost_gbp = calculate_workshop_upgrade_cost(campaign.team)
     if campaign.team.cash < cost_gbp:
@@ -1283,6 +1306,7 @@ def vehicle_unavailable_reason(entry):
 
 
 def start_vehicle_workshop_job(campaign, entry):
+    require_development_season(campaign)
     _require_active_garage_vehicle(campaign, entry, require_ready=False)
     if campaign.record_attempt is not None:
         raise ValueError("finish or abandon the official attempt before workshop work")
@@ -1304,6 +1328,7 @@ def start_vehicle_workshop_job(campaign, entry):
 
 def build_vehicle(campaign, garage_entry, cost_gbp, vehicle=None):
     """Pay up front and queue construction; End Turn delivers finished vehicles."""
+    require_development_season(campaign)
     if campaign.record_attempt is not None:
         raise ValueError("finish the official record attempt before starting construction")
     owned_vehicles = (
@@ -1351,6 +1376,7 @@ def _require_active_garage_vehicle(campaign, garage_entry, require_ready=True):
 
 def adjust_vehicle_ratio_trackside(campaign, garage_entry, gear_index, delta):
     """Apply and charge for a small trackside gearbox ratio adjustment."""
+    require_competition_season(campaign)
     _require_active_garage_vehicle(campaign, garage_entry)
     gearbox = deepcopy(AVAILABLE_GEARBOXES[garage_entry.gearbox_name])
     if garage_entry.gearbox_ratios:
@@ -1367,6 +1393,7 @@ def adjust_vehicle_ratio_trackside(campaign, garage_entry, gear_index, delta):
 
 def apply_gear_ratios_trackside(campaign, garage_entry, gears, final_drive):
     """Fit a complete set of ratios for one trackside service charge."""
+    require_competition_season(campaign)
     _require_active_garage_vehicle(campaign, garage_entry)
     gearbox = AVAILABLE_GEARBOXES[garage_entry.gearbox_name]
     if len(gears) != gearbox.gear_count:
@@ -1381,6 +1408,7 @@ def apply_gear_ratios_trackside(campaign, garage_entry, gears, final_drive):
 
 def fit_trackside_tyres(campaign, garage_entry):
     """Fit researched pneumatic racing tyres without advancing campaign time."""
+    require_competition_season(campaign)
     _require_active_garage_vehicle(campaign, garage_entry)
     if not campaign.research.has_tyre_technology("pneumatic_racing_tyres"):
         raise ValueError("Pneumatic Racing Tyres must be researched first")
@@ -1398,6 +1426,7 @@ def fit_trackside_tyres(campaign, garage_entry):
 
 def fit_trackside_brakes(campaign, garage_entry, brakes_name, current_year):
     """Fit an era-appropriate brake system as low-cost trackside service."""
+    require_competition_season(campaign)
     _require_active_garage_vehicle(campaign, garage_entry)
     if not any(
         brakes.name == brakes_name
@@ -1415,6 +1444,7 @@ def fit_trackside_brakes(campaign, garage_entry, brakes_name, current_year):
 
 def retire_vehicle(campaign, garage_entry):
     """Move an active garage vehicle into the team's museum."""
+    require_development_season(campaign)
     if garage_entry.workshop_turns_remaining > 0:
         raise ValueError("finish workshop work before retiring this vehicle")
     vehicle_index = next(

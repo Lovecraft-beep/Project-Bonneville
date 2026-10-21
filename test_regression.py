@@ -105,6 +105,8 @@ from vehicle_designer import (
 
 
 def complete_engineering_project(campaign, branch, technology_id):
+    if campaign.current_season != "Development":
+        advance_turn(campaign)
     if campaign.current_era not in campaign.development_programs:
         program_for_branch = {
             "aerodynamics": "aerodynamic_pioneer",
@@ -141,7 +143,7 @@ class RunCostTests(unittest.TestCase):
 
 class TestSessionTests(unittest.TestCase):
     def test_eight_hourly_tests_fit_one_session_and_advance_resets_it(self):
-        campaign = CampaignState()
+        campaign = CampaignState(current_day_of_year=183)
         for expected_count in range(1, MAX_TESTS_PER_SESSION + 1):
             self.assertEqual(register_test_run(campaign), expected_count)
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -157,7 +159,7 @@ class TestSessionTests(unittest.TestCase):
         self.assertEqual(campaign.tests_this_session, 0)
 
     def test_record_runs_use_a_separate_session_reset_by_end_turn(self):
-        campaign = CampaignState(tests_this_session=MAX_TESTS_PER_SESSION)
+        campaign = CampaignState(tests_this_session=MAX_TESTS_PER_SESSION, current_day_of_year=183)
         for expected_count in range(1, MAX_RECORD_RUNS_PER_SESSION + 1):
             self.assertEqual(register_record_run(campaign), expected_count)
         self.assertEqual(session_runs_remaining(campaign, record=True), 0)
@@ -171,6 +173,7 @@ class TestSessionTests(unittest.TestCase):
 
     def test_attempt_lapses_only_when_return_pass_cannot_fit(self):
         campaign = CampaignState(
+            current_day_of_year=183,
             record_runs_this_session=MAX_RECORD_RUNS_PER_SESSION - 1,
             record_attempt=CampaignRecordAttempt(
                 "target", "Car", "Track", 1924, 2, [200.0]
@@ -228,7 +231,7 @@ class RecordChaseTests(unittest.TestCase):
 
         for speed in (0.0, 20.0):
             with self.subTest(speed=speed):
-                campaign = CampaignState()
+                campaign = CampaignState(current_day_of_year=183)
                 entry = GarageVehicle(
                     "First Car", "improvised_chassis", PIONEER_SINGLE_CYLINDER.name,
                     "2-Speed Transmission", "Wooden block brakes",
@@ -497,7 +500,7 @@ class MuseumHistoryTests(unittest.TestCase):
                 history = records.vehicle_history(records.load_records(), campaign.campaign_id, vehicle.name)
         self.assertEqual(history.official_best_mph, 22.5)
         self.assertEqual(history.world_records[0]["campaign_year"], 1895)
-        self.assertEqual(history.world_records[0]["campaign_season"], "Spring")
+        self.assertEqual(history.world_records[0]["campaign_season"], "Development")
 
     def test_history_separates_peak_practice_and_official_results_by_car_and_career(self):
         runs = [
@@ -707,7 +710,7 @@ class EngineTuningTests(unittest.TestCase):
         self.assertEqual(campaign.engine_tunes_this_turn, 0)
         next_cost = engine_tune_cost(second.engine_name, 1)
         apply_engine_tune(campaign, second, 1)
-        self.assertEqual(campaign.team.cash, cash - cost - next_cost - 450)
+        self.assertEqual(campaign.team.cash, cash - cost - next_cost - 900)
 
     def test_builder_requires_explicit_reuse_and_keeps_engine_models_separate(self):
         from ui.app import BonnevilleApp
@@ -993,7 +996,10 @@ class FailureRepairTests(unittest.TestCase):
     def test_major_failure_blocks_campaign_run(self):
         from ui.app import BonnevilleApp
 
-        app = SimpleNamespace(garage_return_required=True)
+        app = SimpleNamespace(
+            campaign=CampaignState(current_day_of_year=183),
+            garage_return_required=True,
+        )
         with patch("ui.app.messagebox.showerror") as show_error:
             BonnevilleApp.execute_run(app, object(), PUBLIC_ROADS)
         show_error.assert_called_once()
@@ -1172,7 +1178,7 @@ class RecordAttemptTests(unittest.TestCase):
     def test_1924_attempt_requires_return_and_credits_only_the_average(self):
         from ui.app import BonnevilleApp
 
-        campaign = CampaignState(current_year=1924)
+        campaign = CampaignState(current_year=1924, current_day_of_year=183)
         target = next_historical_target(
             1924, [], campaign.current_day_of_year
         )
@@ -1302,7 +1308,7 @@ class RecordAttemptTests(unittest.TestCase):
     def test_paired_attempt_cannot_start_with_only_one_slot_left(self):
         from ui.app import BonnevilleApp
 
-        campaign = CampaignState(current_year=1924)
+        campaign = CampaignState(current_year=1924, current_day_of_year=183)
         campaign.record_runs_this_session = MAX_RECORD_RUNS_PER_SESSION - 1
         app = SimpleNamespace(
             campaign=campaign,
@@ -1388,7 +1394,7 @@ class TracksideServiceTests(unittest.TestCase):
         )
 
     def test_gear_and_tyre_adjustments_persist_for_five_without_advancing_turn(self):
-        campaign = CampaignState()
+        campaign = CampaignState(current_day_of_year=183)
         entry = self._garage_entry()
         campaign.garage.vehicles.append(entry)
         starting_cash = campaign.team.cash
@@ -1417,7 +1423,7 @@ class TracksideServiceTests(unittest.TestCase):
         self.assertEqual(loaded.turn_number, starting_turn)
 
     def test_trackside_brake_service_costs_five_and_updates_vehicle(self):
-        campaign = CampaignState()
+        campaign = CampaignState(current_day_of_year=183)
         entry = self._garage_entry()
         campaign.garage.vehicles.append(entry)
         starting_cash = campaign.team.cash
@@ -1429,7 +1435,7 @@ class TracksideServiceTests(unittest.TestCase):
         self.assertEqual(campaign.team.cash, starting_cash - 5.0)
 
     def test_researched_early_brakes_can_be_fitted_trackside(self):
-        campaign = CampaignState(current_year=1895)
+        campaign = CampaignState(current_year=1895, current_day_of_year=183)
         entry = self._garage_entry()
         campaign.garage.vehicles.append(entry)
         campaign.research.brake_technology.append("mechanical_drum_brakes")
@@ -1503,7 +1509,7 @@ class TracksideServiceTests(unittest.TestCase):
         )
 
     def test_full_ratio_set_applies_for_one_trackside_charge(self):
-        campaign = CampaignState()
+        campaign = CampaignState(current_day_of_year=183)
         entry = self._garage_entry()
         campaign.garage.vehicles.append(entry)
         starting_cash = campaign.team.cash
@@ -1520,7 +1526,7 @@ class TracksideServiceTests(unittest.TestCase):
     def test_manual_ratio_fields_accept_and_persist_mechanic_precision(self):
         from ui.app import BonnevilleApp
 
-        campaign = CampaignState()
+        campaign = CampaignState(current_day_of_year=183)
         entry = self._garage_entry()
         campaign.garage.vehicles.append(entry)
         app = BonnevilleApp.__new__(BonnevilleApp)
@@ -1558,7 +1564,7 @@ class TracksideServiceTests(unittest.TestCase):
         entry = self._garage_entry()
         vehicle = build_vehicle_from_garage_entry(entry)
         app = BonnevilleApp.__new__(BonnevilleApp)
-        app.campaign = CampaignState()
+        app.campaign = CampaignState(current_day_of_year=183)
         app.last_run_is_sandbox = False
         app.last_run_was_record_attempt = False
         app.last_vehicle_entry = entry
@@ -1742,7 +1748,7 @@ class EngineeringDiagnosisTests(unittest.TestCase):
     def test_successful_official_debrief_does_not_repeat_practice_record_prompt(self):
         from ui.app import BonnevilleApp
 
-        campaign = CampaignState()
+        campaign = CampaignState(current_day_of_year=183)
         campaign.official_record_mph = 30
         report = SimpleNamespace(
             vehicle_name="Record Car", track_name="Public Roads", run_status="COMPLETED",
@@ -1786,7 +1792,7 @@ class EngineeringDiagnosisTests(unittest.TestCase):
         for failed in (False, True):
             with self.subTest(failed=failed):
                 app = SimpleNamespace(
-                    campaign=CampaignState(), last_report=None,
+                    campaign=CampaignState(current_day_of_year=183), last_report=None,
                     garage_return_required=False,
                     last_run_outcome=None,
                     last_run_repaired=False,
@@ -2230,7 +2236,7 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
         advance_turn(campaign)
         self.assertEqual(campaign.current_year, 1927)
         self.assertEqual(campaign.current_day_of_year, 1)
-        self.assertEqual(campaign.current_season, "Spring")
+        self.assertEqual(campaign.current_season, "Development")
         self.assertTrue(campaign.world.reactions)
 
     def test_world_progression_creates_events_rivals_and_reactions(self):

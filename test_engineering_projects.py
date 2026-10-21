@@ -30,7 +30,7 @@ class VehicleConditionTests(unittest.TestCase):
         from ui.app import BonnevilleApp
         from vehicle_designer import build_vehicle_from_garage_entry
 
-        campaign = CampaignState(current_year=1924)
+        campaign = CampaignState(current_year=1924, current_day_of_year=183)
         campaign.team.reputation = 10
         entry = self.entry()
         campaign.garage.vehicles.append(entry)
@@ -78,7 +78,7 @@ class VehicleConditionTests(unittest.TestCase):
         for damage, busy in ((60, False), (100, False), (0, True)):
             for official in (False, True):
                 with self.subTest(damage=damage, busy=busy, official=official):
-                    campaign = CampaignState()
+                    campaign = CampaignState(current_day_of_year=183)
                     entry = self.entry()
                     entry.damage = damage
                     entry.workshop_turns_remaining = int(busy)
@@ -147,7 +147,7 @@ class VehicleConditionTests(unittest.TestCase):
         from management import start_vehicle_workshop_job, vehicle_construction_complexity, vehicle_replacement_cost, vehicle_unavailable_reason
         from research import CHASSIS_TECHNOLOGY_TREE
 
-        campaign = CampaignState()
+        campaign = CampaignState(current_day_of_year=183)
         entry = self.entry()
         entry.chassis_id = CHASSIS_TECHNOLOGY_TREE[-1].technology_id
         entry.damage = 100
@@ -247,7 +247,7 @@ class SponsorDevelopmentTests(unittest.TestCase):
         advance_turn(campaign)
         self.assertEqual(campaign.completed_runs, 0)
         self.assertEqual(campaign.completed_development_milestones, 1)
-        self.assertEqual(campaign.team.cash, cash - 450 + 4000)
+        self.assertEqual(campaign.team.cash, cash - 900 + 4000)
         self.assertTrue(any("Dunlop objective met" in item for item in campaign.world.headlines))
 
     def test_existing_development_is_not_retroactively_rewarded_after_signing(self):
@@ -305,13 +305,13 @@ class SponsorDevelopmentTests(unittest.TestCase):
         start_engineering_project(campaign, "aerodynamics", "wind_deflector")
         cash = campaign.team.cash
         advance_turn(campaign)
-        self.assertEqual(campaign.team.cash, cash - 450)
+        self.assertEqual(campaign.team.cash, cash - 900)
         advance_turn(campaign)
         self.assertEqual(campaign.completed_runs, 0)
-        self.assertEqual(campaign.team.cash, cash - 900 + 3000)
+        self.assertEqual(campaign.team.cash, cash - 1_800 + 3_000)
         self.assertEqual(campaign.sponsorship.objective_for("castrol").development_at_issue, 1)
         advance_turn(campaign)
-        self.assertEqual(campaign.team.cash, cash - 1350 + 3000)
+        self.assertEqual(campaign.team.cash, cash - 2_700 + 3_000)
 
 
 class PersonnelTests(unittest.TestCase):
@@ -325,12 +325,12 @@ class PersonnelTests(unittest.TestCase):
         app = SimpleNamespace(campaign=campaign, team_action=Mock())
         action = lambda state: hire_specialist_engineer(state, "engine")
         with patch("ui.app.messagebox.askyesno", return_value=False) as confirm:
-            BonnevilleApp.hire_staff_action(app, action, "Engine specialist", 16000, 650)
-        self.assertIn("GBP 650 every turn", confirm.call_args.args[1])
-        self.assertIn("GBP 82,900", confirm.call_args.args[1])
+            BonnevilleApp.hire_staff_action(app, action, "Engine specialist", 16000, 1300)
+        self.assertIn("GBP 1,300 every half-year", confirm.call_args.args[1])
+        self.assertIn("GBP 81,800", confirm.call_args.args[1])
         app.team_action.assert_not_called()
         with patch("ui.app.messagebox.askyesno", return_value=True):
-            BonnevilleApp.hire_staff_action(app, action, "Engine specialist", 16000, 650)
+            BonnevilleApp.hire_staff_action(app, action, "Engine specialist", 16000, 1300)
         app.team_action.assert_called_once_with(action, "Engine specialist hired")
 
     def test_parallel_projects_reserve_specialist_and_standard_staff_separately(self):
@@ -374,7 +374,7 @@ class PersonnelTests(unittest.TestCase):
             save_campaign(campaign, path)
             restored = load_campaign(path)
         self.assertEqual(restored.team, campaign.team)
-        self.assertEqual(restored.team.payroll_per_turn_gbp, 1350)
+        self.assertEqual(restored.team.payroll_per_turn_gbp, 2700)
         self.assertEqual(restored.engineering_projects[0].specialists, ["aerodynamics"])
         self.assertEqual(available_engineer_specialties(restored), [])
 
@@ -388,7 +388,7 @@ class PersonnelTests(unittest.TestCase):
         hire_engineer(campaign)
         self.assertEqual(campaign.turn_number, 1)
         self.assertEqual(campaign.team.cash, cash - 8000)
-        expected = campaign.team.cash + campaign.sponsorship.income_per_turn_gbp - 700
+        expected = campaign.team.cash + campaign.sponsorship.income_per_turn_gbp - 1_400
         self.assertEqual(campaign.projected_next_turn_cash_gbp, expected)
         advance_turn(campaign)
         self.assertEqual(campaign.team.cash, expected)
@@ -402,7 +402,7 @@ class PersonnelTests(unittest.TestCase):
         dismiss_engineer(campaign)
         dismiss_mechanic(campaign)
         self.assertEqual(campaign.team.cash, cash)
-        self.assertEqual(campaign.team.payroll_per_turn_gbp, 350)
+        self.assertEqual(campaign.team.payroll_per_turn_gbp, 700)
         with self.assertRaisesRegex(ValueError, "at least one engineer"):
             dismiss_engineer(campaign)
 
@@ -414,7 +414,7 @@ class PersonnelTests(unittest.TestCase):
         select_development_program(campaign, "aerodynamic_pioneer")
         hire_specialist_engineer(campaign, "aerodynamics")
         self.assertEqual(campaign.team.engineers, 2)
-        self.assertEqual(campaign.team.payroll_per_turn_gbp, 1100)
+        self.assertEqual(campaign.team.payroll_per_turn_gbp, 2200)
         node = AERODYNAMICS_TECHNOLOGY_TREE[0]
         self.assertEqual(engineering_project_terms(campaign, "aerodynamics", node)[1], 1)
         self.assertEqual(engineering_project_terms(campaign, "engine", node)[1], 4)
@@ -425,8 +425,9 @@ class PersonnelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unassigned specialist"):
             dismiss_engineer(campaign, "aerodynamics")
         advance_turn(campaign)
+        advance_turn(campaign)
         dismiss_engineer(campaign, "aerodynamics")
-        self.assertEqual(campaign.team.payroll_per_turn_gbp, 450)
+        self.assertEqual(campaign.team.payroll_per_turn_gbp, 900)
 
     def test_experienced_mechanic_improves_risk_and_repair_coverage(self):
         from management import Team, dismiss_mechanic, hire_experienced_mechanic
@@ -435,7 +436,7 @@ class PersonnelTests(unittest.TestCase):
         standard = Team(mechanics=1)
         campaign = CampaignState(team=Team(mechanics=0))
         hire_experienced_mechanic(campaign)
-        self.assertEqual(campaign.team.payroll_per_turn_gbp, 500)
+        self.assertEqual(campaign.team.payroll_per_turn_gbp, 1000)
         self.assertFalse(can_repair_trackside(standard))
         self.assertTrue(can_repair_trackside(campaign.team))
         self.assertLess(
@@ -447,22 +448,22 @@ class PersonnelTests(unittest.TestCase):
 
     def test_idle_and_allocated_staff_draw_wages_once_per_turn(self):
         campaign = CampaignState()
-        self.assertEqual(campaign.team.payroll_per_turn_gbp, 450)
+        self.assertEqual(campaign.team.payroll_per_turn_gbp, 900)
         select_development_program(campaign, "aerodynamic_pioneer")
         start_engineering_project(campaign, "aerodynamics", "wind_deflector")
         cash = campaign.team.cash
         advance_turn(campaign)
-        self.assertEqual(campaign.team.cash, cash - 450)
-        advance_turn(campaign)
         self.assertEqual(campaign.team.cash, cash - 900)
         advance_turn(campaign)
-        self.assertEqual(campaign.team.cash, cash - 1350)
+        self.assertEqual(campaign.team.cash, cash - 1_800)
+        advance_turn(campaign)
+        self.assertEqual(campaign.team.cash, cash - 2_700)
 
     def test_payroll_can_create_a_visible_deficit_without_blocking_turns(self):
         campaign = CampaignState()
         campaign.team.cash = 100
         advance_turn(campaign)
-        self.assertEqual(campaign.team.cash, -350)
+        self.assertEqual(campaign.team.cash, -800)
         self.assertEqual(campaign.turn_number, 2)
         self.assertTrue(any("PAYROLL WARNING" in item for item in campaign.world.headlines))
 
@@ -545,8 +546,14 @@ class VehicleConstructionTests(unittest.TestCase):
         from tracks import PUBLIC_ROADS
         from ui.app import BonnevilleApp
 
+        from research import CHASSIS_TECHNOLOGY_TREE
+
         campaign = CampaignState()
-        project = build_vehicle(campaign, self.entry(), 100)
+        entry = self.entry(chassis_id=CHASSIS_TECHNOLOGY_TREE[-1].technology_id)
+        project = build_vehicle(campaign, entry, 100)
+        advance_turn(campaign)
+        self.assertEqual(campaign.current_season, "Competition")
+        self.assertEqual(project.turns_remaining, 4)
         app = SimpleNamespace(campaign=campaign, garage_return_required=False)
         for official in (False, True):
             with self.subTest(official=official), patch("ui.app.messagebox.showerror") as error:
@@ -569,34 +576,70 @@ class VehicleConstructionTests(unittest.TestCase):
         self.assertEqual(campaign.team.cash, 99_000)
 
 
+class CampaignPhaseActionTests(unittest.TestCase):
+    def test_development_and_competition_expose_different_actions(self):
+        from management import hire_mechanic, register_test_run, start_engineering_project
+
+        campaign = CampaignState()
+        select_development_program(campaign, "aerodynamic_pioneer")
+        project = start_engineering_project(campaign, "aerodynamics", "wind_deflector")
+        with self.assertRaisesRegex(ValueError, "Competition season"):
+            register_test_run(campaign)
+
+        advance_turn(campaign)
+        self.assertEqual(campaign.current_season, "Competition")
+        self.assertEqual(register_test_run(campaign), 1)
+        with self.assertRaisesRegex(ValueError, "Development season"):
+            hire_mechanic(campaign)
+        with self.assertRaisesRegex(ValueError, "Development season"):
+            start_engineering_project(campaign, "aerodynamics", "wheel_fairings_/_spats")
+
+        advance_turn(campaign)
+        self.assertEqual((campaign.current_year, campaign.current_season), (1896, "Development"))
+        self.assertEqual(project.turns_remaining, 0)
+        self.assertEqual(campaign.tests_this_session, 0)
+        hire_mechanic(campaign)
+        self.assertEqual(campaign.team.mechanics, 3)
+
+    def test_two_turns_preserve_annual_starting_payroll_and_sponsor_income(self):
+        from sponsors import SPONSOR_BY_ID
+
+        campaign = CampaignState()
+        self.assertEqual(campaign.team.payroll_per_turn_gbp * 2, 1_800)
+        self.assertEqual(SPONSOR_BY_ID["shell"].income_per_turn_gbp * 2, 8_000)
+        self.assertEqual(SPONSOR_BY_ID["government_grant"].income_per_turn_gbp * 2, 16_000)
+
+
 class WartimeProgressionTests(unittest.TestCase):
     def test_end_turn_skips_first_world_war_and_advances_elapsed_campaign_systems(self):
-        campaign = CampaignState(current_year=1913, current_day_of_year=274)
+        campaign = CampaignState(current_year=1913, current_day_of_year=1)
         select_development_program(campaign, "aerodynamic_pioneer")
         start_engineering_project(campaign, "aerodynamics", "wind_deflector")
         car = VehicleConstructionTests().entry("Wartime Build")
         build_vehicle(campaign, car, 1_000)
         starting_cash = campaign.team.cash
 
+        advance_turn(campaign)
+        self.assertEqual((campaign.current_year, campaign.current_season), (1913, "Competition"))
         completed = advance_turn(campaign)
 
-        self.assertEqual((campaign.current_year, campaign.current_season), (1919, "Spring"))
+        self.assertEqual((campaign.current_year, campaign.current_season), (1919, "Development"))
         self.assertEqual(campaign.current_day_of_year, 1)
-        self.assertEqual(campaign.turn_number, 22)
+        self.assertEqual(campaign.turn_number, 13)
         self.assertEqual(completed, ("wind_deflector",))
         self.assertTrue(campaign.research.has_aerodynamics_technology("wind_deflector"))
         self.assertEqual(campaign.garage.vehicles, [car])
         self.assertEqual(campaign.completed_development_milestones, 2)
-        self.assertEqual(campaign.team.cash, starting_cash - 21 * campaign.team.payroll_per_turn_gbp)
+        self.assertEqual(campaign.team.cash, starting_cash - 12 * campaign.team.payroll_per_turn_gbp)
         self.assertTrue(any("WARTIME STAND-DOWN" in item for item in campaign.world.headlines))
 
     def test_end_turn_skips_second_world_war_pause(self):
         campaign = CampaignState(current_year=1938, current_day_of_year=274)
         advance_turn(campaign)
-        self.assertEqual((campaign.current_year, campaign.current_season), (1947, "Spring"))
+        self.assertEqual((campaign.current_year, campaign.current_season), (1947, "Development"))
         self.assertEqual(campaign.current_day_of_year, 1)
-        self.assertEqual(campaign.turn_number, 34)
-        self.assertEqual(campaign.team.cash, 100_000 - 33 * campaign.team.payroll_per_turn_gbp)
+        self.assertEqual(campaign.turn_number, 18)
+        self.assertEqual(campaign.team.cash, 100_000 - 17 * campaign.team.payroll_per_turn_gbp)
         self.assertTrue(any("1938-1946" in item for item in campaign.world.headlines))
 
     def test_wartime_skip_does_not_affect_explicit_day_advancement(self):
@@ -607,20 +650,19 @@ class WartimeProgressionTests(unittest.TestCase):
 
 
 class EngineeringProjectTests(unittest.TestCase):
-    def test_turns_cycle_four_seasons_before_advancing_year(self):
+    def test_development_and_competition_each_occupy_half_a_year(self):
         campaign = CampaignState()
-        self.assertEqual((campaign.current_season, campaign.current_year), ("Spring", 1895))
+        self.assertEqual((campaign.current_season, campaign.current_year), ("Development", 1895))
         for season, year, day in (
-            ("Summer", 1895, 92),
-            ("Autumn", 1895, 183),
-            ("Winter", 1895, 274),
-            ("Spring", 1896, 1),
-            ("Summer", 1896, 92),
+            ("Competition", 1895, 183),
+            ("Development", 1896, 1),
+            ("Competition", 1896, 183),
+            ("Development", 1897, 1),
         ):
             advance_turn(campaign)
             self.assertEqual((campaign.current_season, campaign.current_year), (season, year))
             self.assertEqual(campaign.current_day_of_year, day)
-        self.assertEqual(campaign.turn_number, 6)
+        self.assertEqual(campaign.turn_number, 5)
 
     def test_wind_deflector_takes_three_turns_and_reserves_engineer(self):
         campaign = CampaignState()
@@ -645,7 +687,7 @@ class EngineeringProjectTests(unittest.TestCase):
         completed = advance_turn(campaign)
 
         self.assertEqual(completed, ("wind_deflector",))
-        self.assertEqual((campaign.current_season, campaign.current_year), ("Autumn", 1895))
+        self.assertEqual((campaign.current_season, campaign.current_year), ("Development", 1896))
         self.assertTrue(
             campaign.research.has_aerodynamics_technology("wind_deflector")
         )
@@ -674,9 +716,9 @@ class EngineeringProjectTests(unittest.TestCase):
             {"Pioneers": "aerodynamic_pioneer"},
         )
         self.assertEqual(restored.available_engineers, 0)
-        self.assertEqual((restored.current_season, restored.current_year), ("Summer", 1895))
+        self.assertEqual((restored.current_season, restored.current_year), ("Competition", 1895))
         advance_turn(restored)
-        self.assertEqual((restored.current_season, restored.current_year), ("Autumn", 1895))
+        self.assertEqual((restored.current_season, restored.current_year), ("Development", 1896))
         self.assertTrue(
             restored.research.has_aerodynamics_technology("wind_deflector")
         )
