@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from research import CHASSIS_TECHNOLOGY_TREE
+from research import CHASSIS_TECHNOLOGY_TREE, CHASSIS_TIERS_PER_ERA
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class Chassis:
     required_technology: str | None = None
 
 
-# Stat ranges spanning the whole 25-tier lineage, from an 1890s wooden
+# Stat ranges spanning the whole chassis lineage, from an 1890s wooden
 # carriage to a next-generation composite chassis.
 _MASS_KG_RANGE = (2_200.0, 400.0)
 _DRAG_COEFFICIENT_RANGE = (0.60, 0.12)
@@ -37,10 +37,10 @@ def _interpolate_exponential(start, end, fraction):
 
 
 def _construction_cost_gbp(tier_number):
-    """Escalate construction cost across the 25-tier lineage."""
-    era_index, tier_index = divmod(tier_number, 5)
+    """Escalate construction cost across the chassis lineage."""
+    era_index, tier_index = divmod(tier_number, CHASSIS_TIERS_PER_ERA)
     base = 2_000.0 * (1.8**era_index)
-    return round(base * (1.15**tier_index) / 100) * 100
+    return round(base * (1.3**tier_index) / 100) * 100
 
 
 def _build_catalog():
@@ -91,15 +91,15 @@ CHASSIS_BY_ID = {chassis.chassis_id: chassis for chassis in CHASSIS_CATALOG}
 # resolvable so vehicles already saved to a garage don't break.
 LEGACY_CHASSIS_ALIASES = {
     "lightweight_streamliner": "advanced_edwardian_racing_frame",
-    "balanced_racer": "reinforced_ladder_frame",
+    "balanced_racer": "carriage_frame",
     "heavy_duty_racer": "heavy_duty_racing_ladder",
     "chassis_steel_rail_1": "carriage_frame",
-    "chassis_steel_rail_2": "reinforced_ladder_frame",
+    "chassis_steel_rail_2": "carriage_frame",
     "chassis_steel_rail_3": "heavy_duty_racing_ladder",
-    "chassis_spaceframe_1": "pressed_steel_ladder_frame",
+    "chassis_spaceframe_1": "heavy_duty_racing_ladder",
     "chassis_spaceframe_2": "advanced_edwardian_racing_frame",
     "chassis_composite_1": "braced_box_section_frame",
-    "chassis_composite_2": "underslung_racing_chassis",
+    "chassis_composite_2": "braced_box_section_frame",
 }
 for legacy_id, replacement_id in LEGACY_CHASSIS_ALIASES.items():
     CHASSIS_BY_ID[legacy_id] = CHASSIS_BY_ID[replacement_id]

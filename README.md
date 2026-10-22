@@ -220,22 +220,28 @@ campaign. Its base project times are:
 | Wind Deflector | None | 3 |
 | Wheel Fairings / Spats | Wind Deflector | 3 |
 | Basic Streamlining | Wheel Fairings / Spats | 3 |
-| Carriage Frame | Basic Streamlining | 3 |
+| Carriage Frame | Basic Streamlining | 6 |
 
 Completing Basic Streamlining makes Carriage Frame available to research.
 Completing Carriage Frame then unlocks these projects in their respective tabs:
 
-- **Chassis:** Reinforced Ladder Frame
+- **Chassis:** Heavy-Duty Racing Ladder
 - **Engine:** Pioneer Engines
 - **Tyres:** Pneumatic Racing Tyres
 - **Brakes:** Mechanical Drum Brakes
 
 Under Aerodynamic Pioneer, the first three aero projects each take two seasonal
 turns, so Carriage Frame becomes available after six turn advances. It then takes
-three turns under that program, completing in Summer 1897 when started as soon
-as it unlocks. Starting a project does not advance time; **End turn** progresses
+six turns, completing in Spring 1898 when started as soon as it unlocks.
+Starting a project does not advance time; **End turn** progresses
 active projects by one season. Research becomes available through completed
 prerequisites, not merely by reaching a particular calendar year.
+
+Chassis development is a chain of three major generations per era rather than
+a ladder of small refinements. Each generation is a substantial investment:
+Pioneer frames take six to eight seasons and later generations take longer,
+with the final era's chassis taking up to sixteen seasons. Completing all three
+generations of an era opens the next era's chassis research.
 
 The starting team has one engineer, and each opening project reserves that
 engineer until completion, so only one can run at a time. Later projects may

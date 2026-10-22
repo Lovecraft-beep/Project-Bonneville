@@ -82,6 +82,7 @@ from management import (
 from research import (
     AERODYNAMICS_TECHNOLOGY_TREE,
     CHASSIS_TECHNOLOGY_TREE,
+    CHASSIS_TIERS_PER_ERA,
     ENGINE_TECHNOLOGY_TREE,
     available_aerodynamics_technologies,
     available_brake_technologies,
@@ -791,7 +792,7 @@ class EngineTuningTests(unittest.TestCase):
     def _garage_entry(self, stage=0):
         return GarageVehicle(
             vehicle_name="Tune Test",
-            chassis_id=CHASSIS_TECHNOLOGY_TREE[5].technology_id,
+            chassis_id=CHASSIS_TECHNOLOGY_TREE[CHASSIS_TIERS_PER_ERA].technology_id,
             engine_name=NAPIER_LION.name,
             gearbox_name=TRANSMISSION_CATALOG[2].name,
             brakes_name="1920s mechanical drum brakes",
@@ -1384,7 +1385,7 @@ class TracksideServiceTests(unittest.TestCase):
     def _garage_entry(self):
         return GarageVehicle(
             vehicle_name="Trackside Test",
-            chassis_id=CHASSIS_TECHNOLOGY_TREE[5].technology_id,
+            chassis_id=CHASSIS_TECHNOLOGY_TREE[CHASSIS_TIERS_PER_ERA].technology_id,
             engine_name=NAPIER_LION.name,
             gearbox_name=TRANSMISSION_CATALOG[2].name,
             brakes_name="1920s mechanical drum brakes",
@@ -2645,6 +2646,21 @@ class CampaignProgressionRegressionTests(unittest.TestCase):
                 loaded = records.load_records()
                 self.assertEqual(len(loaded), 1)
                 records.display_records(loaded, campaign.campaign_id)
+
+
+class ChassisGenerationTests(unittest.TestCase):
+    def test_each_era_has_three_major_chassis_generations(self):
+        from research import ERAS
+
+        self.assertEqual(len(CHASSIS_TECHNOLOGY_TREE), len(ERAS) * CHASSIS_TIERS_PER_ERA)
+        for era in ERAS:
+            era_nodes = [node for node in CHASSIS_TECHNOLOGY_TREE if node.era == era.name]
+            self.assertEqual(len(era_nodes), CHASSIS_TIERS_PER_ERA)
+        self.assertEqual(
+            [node.turns_required for node in CHASSIS_TECHNOLOGY_TREE[:CHASSIS_TIERS_PER_ERA]],
+            [6, 7, 8],
+        )
+        self.assertGreaterEqual(CHASSIS_TECHNOLOGY_TREE[0].cost_gbp, 12_000)
 
 
 if __name__ == "__main__":

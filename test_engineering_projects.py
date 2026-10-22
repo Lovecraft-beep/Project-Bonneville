@@ -514,11 +514,11 @@ class VehicleConstructionTests(unittest.TestCase):
         self.assertEqual(restored.garage.vehicles, [entry])
 
     def test_complexity_uses_fitted_components_not_campaign_date(self):
-        from research import CHASSIS_TECHNOLOGY_TREE
+        from research import CHASSIS_TECHNOLOGY_TREE, CHASSIS_TIERS_PER_ERA
 
         self.assertEqual(
             [vehicle_construction_complexity(self.entry(chassis_id=node.technology_id))
-             for node in CHASSIS_TECHNOLOGY_TREE[::5]],
+             for node in CHASSIS_TECHNOLOGY_TREE[::CHASSIS_TIERS_PER_ERA]],
             [1, 2, 3, 4, 5],
         )
         entry = self.entry()

@@ -59,6 +59,34 @@ def _tier_turns_required(era_index, tier_index):
     return 3 + era_index + tier_index // 2
 
 
+# Chassis development is a small number of major generational projects per
+# era rather than a ladder of incremental frames.
+CHASSIS_TIERS_PER_ERA = 3
+
+# Branch costs and durations are expressed on the original five-step scale
+# within an era, independent of how many chassis tiers each era contains.
+_BRANCH_POSITION_SCALE = 4
+
+
+def _chassis_cost_gbp(era_index, tier_index):
+    base = 12_000.0 * (2**era_index)
+    return round(base * (1.5**tier_index) / 500) * 500
+
+
+def _chassis_engineers_required(era_index, tier_index):
+    return min(6, 1 + era_index + tier_index)
+
+
+def _chassis_turns_required(era_index, tier_index):
+    return 6 + 2 * era_index + tier_index
+
+
+def _era_position(tier_index, tier_count, target_count):
+    if tier_count <= 1:
+        return 0
+    return round(tier_index * (target_count - 1) / (tier_count - 1))
+
+
 AERODYNAMICS_DETAILS = {
     "Wind Deflector": (
         "A small screen that protects the driver and slightly cleans the airflow.",
@@ -177,8 +205,8 @@ AERODYNAMICS_DETAILS = {
 }
 
 
-# Five eras of land-speed-record history. Each contributes five ascending
-# chassis tiers and five ascending engine tiers.
+# Five eras of land-speed-record history. Each contributes three major
+# chassis generations and a short chain of engine tiers.
 ERA_DEFINITIONS = (
     {
         "name": "Pioneers",
@@ -202,9 +230,7 @@ ERA_DEFINITIONS = (
         ),
         "chassis_tiers": (
             "Carriage Frame",
-            "Reinforced Ladder Frame",
             "Heavy-Duty Racing Ladder",
-            "Pressed-Steel Ladder Frame",
             "Advanced Edwardian Racing Frame",
         ),
         "engine_tiers": (
@@ -234,9 +260,7 @@ ERA_DEFINITIONS = (
         ),
         "chassis_tiers": (
             "Braced Box-Section Frame",
-            "Underslung Racing Chassis",
             "Twin-Rail Streamliner Frame",
-            "Riveted Aircraft-Alloy Frame",
             "Full-Envelope Streamliner Chassis",
         ),
         "engine_tiers": (
@@ -266,9 +290,7 @@ ERA_DEFINITIONS = (
         ),
         "chassis_tiers": (
             "Riveted Aluminium Monocoque",
-            "Multi-Wheel Stabilised Frame",
             "Jet-Intake Structural Frame",
-            "Rocket-Ready Reinforced Frame",
             "Supersonic Stability Frame",
         ),
         "engine_tiers": (
@@ -299,8 +321,6 @@ ERA_DEFINITIONS = (
         "chassis_tiers": (
             "Tubular Steel Spaceframe",
             "Computer-Optimised Spaceframe",
-            "Composite-Panelled Spaceframe",
-            "Carbon-Kevlar Monocoque",
             "Advanced Aerospace Composite Chassis",
         ),
         "engine_tiers": (
@@ -330,9 +350,7 @@ ERA_DEFINITIONS = (
         ),
         "chassis_tiers": (
             "Full Carbon-Fibre Monocoque",
-            "Active-Aero Composite Chassis",
             "Hybrid-Structural Battery Chassis",
-            "Adaptive Smart-Material Chassis",
             "Next-Generation Autonomous Speed Chassis",
         ),
         "engine_tiers": (
@@ -346,8 +364,8 @@ ERA_DEFINITIONS = (
 def _build_trees(era_definitions):
     """Build the chassis and engine trees from the era definitions.
 
-    Chassis tiers form one continuous chain of five tiers per era (each
-    requires the previous tier, regardless of era). Engine tiers form a
+    Chassis tiers form one continuous chain of major generations per era
+    (each requires the previous tier, regardless of era). Engine tiers form a
     shorter parallel chain per era; each engine tier requires the previous
     engine tier plus whichever chassis tier in the same era is at the same
     relative position (e.g. the first engine tier needs the era's first
@@ -371,9 +389,9 @@ def _build_trees(era_definitions):
         eras.append(era)
 
         era_chassis_ids = []
-        for tier_index in range(5):
-            cost_gbp = _tier_cost_gbp(era_index, tier_index)
-            engineers_required = _tier_engineers_required(era_index, tier_index)
+        for tier_index in range(len(definition["chassis_tiers"])):
+            cost_gbp = _chassis_cost_gbp(era_index, tier_index)
+            engineers_required = _chassis_engineers_required(era_index, tier_index)
 
             chassis_name = definition["chassis_tiers"][tier_index]
             chassis_id = _slugify(chassis_name)
@@ -390,7 +408,7 @@ def _build_trees(era_definitions):
                     chassis_prerequisites,
                     cost_gbp,
                     engineers_required,
-                    turns_required=_tier_turns_required(era_index, tier_index),
+                    turns_required=_chassis_turns_required(era_index, tier_index),
                 )
             )
             previous_chassis_id = chassis_id
@@ -398,17 +416,15 @@ def _build_trees(era_definitions):
 
         engine_tiers = definition["engine_tiers"]
         for engine_tier_index, engine_name in enumerate(engine_tiers):
-            if len(engine_tiers) > 1:
-                chassis_index = round(
-                    engine_tier_index
-                    * (len(era_chassis_ids) - 1)
-                    / (len(engine_tiers) - 1)
-                )
-            else:
-                chassis_index = 0
+            chassis_index = _era_position(
+                engine_tier_index, len(engine_tiers), len(era_chassis_ids)
+            )
+            position = _era_position(
+                engine_tier_index, len(engine_tiers), _BRANCH_POSITION_SCALE + 1
+            )
             required_chassis_id = era_chassis_ids[chassis_index]
-            cost_gbp = _tier_cost_gbp(era_index, chassis_index)
-            engineers_required = _tier_engineers_required(era_index, chassis_index)
+            cost_gbp = _tier_cost_gbp(era_index, position)
+            engineers_required = _tier_engineers_required(era_index, position)
 
             engine_id = _slugify(engine_name)
             engine_prerequisites = tuple(
@@ -427,7 +443,7 @@ def _build_trees(era_definitions):
                     engine_prerequisites,
                     cost_gbp,
                     engineers_required,
-                    turns_required=_tier_turns_required(era_index, chassis_index),
+                    turns_required=_tier_turns_required(era_index, position),
                 )
             )
             previous_engine_id = engine_id
@@ -444,10 +460,11 @@ def _build_branch_tree(era_definitions, branch_key):
         era_chassis_ids = [_slugify(name) for name in definition["chassis_tiers"]]
         tier_names = definition[branch_key]
         for tier_index, technology_name in enumerate(tier_names):
-            chassis_index = (
-                round(tier_index * (len(era_chassis_ids) - 1) / (len(tier_names) - 1))
-                if len(tier_names) > 1
-                else 0
+            chassis_index = _era_position(
+                tier_index, len(tier_names), len(era_chassis_ids)
+            )
+            position = _era_position(
+                tier_index, len(tier_names), _BRANCH_POSITION_SCALE + 1
             )
             prerequisites = tuple(
                 prerequisite
@@ -456,8 +473,8 @@ def _build_branch_tree(era_definitions, branch_key):
             )
             if branch_key == "aerodynamics_tiers" and era_index == 0:
                 prerequisites = (previous_id,) if previous_id else ()
-            cost_gbp = _tier_cost_gbp(era_index, chassis_index)
-            engineers_required = _tier_engineers_required(era_index, chassis_index)
+            cost_gbp = _tier_cost_gbp(era_index, position)
+            engineers_required = _tier_engineers_required(era_index, position)
             if branch_key == "aerodynamics_tiers" and era_index == 0:
                 # The opening path gates chassis research, so a starting team must afford it.
                 cost_gbp = _tier_cost_gbp(0, tier_index)
@@ -485,7 +502,7 @@ def _build_branch_tree(era_definitions, branch_key):
                     turns_required=(
                         3
                         if era_index == 0
-                        else _tier_turns_required(era_index, chassis_index)
+                        else _tier_turns_required(era_index, position)
                     ),
                 )
             )
