@@ -20,6 +20,7 @@ class TelemetrySample:
     brake_temperature_c: float
     brake_fade: bool
     phase: str
+    wheel_lock: bool = False
 
 
 @dataclass
@@ -38,6 +39,7 @@ class SimulationResult:
     maximum_brake_temperature_c: float
     completed: bool
     telemetry: list[TelemetrySample]
+    wheel_lock_event_count: int = 0
 
 
 def calculate_drag_force(
@@ -67,6 +69,9 @@ def run_simulation(
     time_step=0.1,
     track_friction_factor=1.0,
     air_density_kg_m3=STANDARD_AIR_DENSITY,
+    driver_skill=1.0,
+    anti_lock_brakes=False,
+    traction_control=False,
 ):
     """Simulate acceleration, a measured mile, and braking on a track."""
     if track_miles <= 0:
@@ -89,6 +94,8 @@ def run_simulation(
         raise ValueError(
             "vehicle values and friction factors must be greater than zero"
         )
+    if not 0.0 <= driver_skill <= 1.0:
+        raise ValueError("driver_skill must be between zero and one")
 
     rolling_resistance = 0.015
     drivetrain_efficiency = 0.85
@@ -98,6 +105,7 @@ def run_simulation(
     power_watts = vehicle.power * HORSEPOWER_IN_WATTS * drivetrain_efficiency
     effective_traction = vehicle.tyre_grip_factor * track_friction_factor
     maximum_traction_force = effective_traction * vehicle.mass * 9.81
+    thrust_powered = vehicle.engine.torque_curve_type in ("turbojet", "rocket")
     if vehicle.brakes is None:
         raise ValueError("vehicle must have a brake system")
     vehicle.brakes.reset()
@@ -112,8 +120,10 @@ def run_simulation(
     next_telemetry_time = 1.0
     previous_gear = 1
     previous_wheelspin = False
+    previous_wheel_lock = False
     gear_change_count = 0
     wheelspin_event_count = 0
+    wheel_lock_event_count = 0
     acceleration_total_g = 0.0
     acceleration_step_count = 0
     deceleration_total_g = 0.0
@@ -131,6 +141,7 @@ def run_simulation(
         previous_distance = distance
         previous_speed = speed
         wheelspin = False
+        wheel_lock = False
 
         if distance < measured_end:
             engine_rpm = vehicle.gearbox.engine_rpm(speed, vehicle.wheel_radius_m)
@@ -150,8 +161,20 @@ def run_simulation(
                 / vehicle.wheel_radius_m
             )
             requested_force = min(power_limited_force, torque_limited_force)
-            wheelspin = requested_force > maximum_traction_force
-            available_force = min(requested_force, maximum_traction_force)
+            if thrust_powered:
+                available_force = requested_force
+            elif traction_control or driver_skill >= 1.0:
+                available_force = min(requested_force, maximum_traction_force)
+            else:
+                control_limit = maximum_traction_force * (
+                    0.65 + 0.35 * driver_skill
+                )
+                wheelspin = requested_force > control_limit
+                available_force = (
+                    maximum_traction_force * (0.65 + 0.25 * driver_skill)
+                    if wheelspin
+                    else min(requested_force, maximum_traction_force)
+                )
             acceleration = (available_force - drag_force - rolling_force) / vehicle.mass
             speed = max(0.0, speed + acceleration * time_step)
             vehicle.gearbox.advance_shift(time_step)
@@ -163,9 +186,21 @@ def run_simulation(
                 decelerating=True,
                 rpm_limit=shift_limit,
             )
-            brake_force = vehicle.brakes.calculate_force(
-                vehicle.mass,
-                maximum_traction_force,
+            requested_brake_force = vehicle.brakes.calculate_force(
+                vehicle.mass, float("inf")
+            )
+            lock_threshold = maximum_traction_force * (
+                0.65 + 0.35 * driver_skill
+            )
+            wheel_lock = (
+                not anti_lock_brakes
+                and driver_skill < 1.0
+                and requested_brake_force > lock_threshold
+            )
+            brake_force = (
+                maximum_traction_force * (0.25 + 0.10 * driver_skill)
+                if wheel_lock
+                else min(requested_brake_force, maximum_traction_force)
             )
             vehicle.brakes.update_temperature(brake_force, speed, time_step)
             brake_acceleration = brake_force / vehicle.mass
@@ -201,6 +236,9 @@ def run_simulation(
         if wheelspin and not previous_wheelspin:
             wheelspin_event_count += 1
         previous_wheelspin = wheelspin
+        if wheel_lock and not previous_wheel_lock:
+            wheel_lock_event_count += 1
+        previous_wheel_lock = wheel_lock
 
         if measured_start_time is None and distance >= measured_start:
             measured_start_time = elapsed
@@ -230,6 +268,7 @@ def run_simulation(
                     brake_temperature_c=round(vehicle.brakes.temperature_c, 1),
                     brake_fade=vehicle.brakes.faded,
                     phase=phase,
+                    wheel_lock=wheel_lock,
                 )
             )
             next_telemetry_time += 1.0
@@ -253,6 +292,7 @@ def run_simulation(
                 brake_temperature_c=round(vehicle.brakes.temperature_c, 1),
                 brake_fade=vehicle.brakes.faded,
                 phase="decelerating",
+                wheel_lock=wheel_lock,
             )
         )
     if measured_start_time is None or measured_end_time is None:
@@ -283,4 +323,5 @@ def run_simulation(
         maximum_brake_temperature_c=round(vehicle.brakes.temperature_c, 1),
         completed=completed,
         telemetry=telemetry,
+        wheel_lock_event_count=wheel_lock_event_count,
     )

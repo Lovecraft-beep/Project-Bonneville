@@ -43,6 +43,8 @@ from historical_records import (
 from management import (
     CampaignRecordAttempt,
     DEVELOPMENT_PROGRAMS,
+    DRIVER_TRAINING_COST_GBP,
+    DRIVER_TRAINING_INCREMENT,
     ENGINEER_HIRE_COST_GBP,
     ENGINEER_WAGE_GBP,
     MECHANIC_HIRE_COST_GBP,
@@ -92,6 +94,7 @@ from management import (
     sign_sponsor,
     select_development_program,
     standing_world_record,
+    train_driver,
     record_chase_target,
     describe_sponsor_objective,
     start_engineering_project,
@@ -1609,6 +1612,9 @@ class BonnevilleApp(tk.Tk):
             measured_mile_start=track.measured_mile_start,
             track_friction_factor=track.friction_factor,
             air_density_kg_m3=track.air_density_kg_m3,
+            driver_skill=self.campaign.driver_skill,
+            anti_lock_brakes="anti_lock_braking" in self.campaign.research.brake_technology,
+            traction_control="traction_control" in self.campaign.research.engine_technology,
         )
         append_run_log(vehicle, track, result)
         self.last_report = create_engineering_report(
@@ -1848,6 +1854,9 @@ class BonnevilleApp(tk.Tk):
             measured_mile_start=track.measured_mile_start,
             track_friction_factor=track.friction_factor,
             air_density_kg_m3=track.air_density_kg_m3,
+            driver_skill=self.campaign.driver_skill,
+            anti_lock_brakes="anti_lock_braking" in self.campaign.research.brake_technology,
+            traction_control="traction_control" in self.campaign.research.engine_technology,
         )
         outcome = resolve_run_failure(
             vehicle.engine,
@@ -1859,6 +1868,7 @@ class BonnevilleApp(tk.Tk):
             failure_risk_multiplier=development_failure_risk_multiplier(
                 self.campaign
             ) * condition_failure_multiplier(entry.wear, entry.damage),
+            wheel_lock_event_count=getattr(result, "wheel_lock_event_count", 0),
         )
         condition_note = apply_vehicle_run_condition(self.campaign, entry, result.peak_speed_mph, outcome)
         if outcome.failed and entry.damage >= 60 and outcome.repaired:
@@ -2045,7 +2055,7 @@ class BonnevilleApp(tk.Tk):
         report_text(
             f"Peak: {result.peak_speed_mph:.1f} mph  /  Measured mile: {result.measured_mile_speed_mph:.1f} mph\n"
             f"Average acceleration: {result.average_acceleration_g:.3f} G  /  Average deceleration: {result.average_deceleration_g:.3f} G\n"
-            f"Brake temperature: {result.maximum_brake_temperature_c:.0f} C  /  Wheelspin events: {result.wheelspin_event_count}",
+            f"Brake temperature: {result.maximum_brake_temperature_c:.0f} C  /  Wheelspin events: {result.wheelspin_event_count}  /  Wheel lock-ups: {getattr(result, 'wheel_lock_event_count', 0)}",
             MUTED,
         )
         self.section(page, "Recommendations")
@@ -2456,7 +2466,7 @@ class BonnevilleApp(tk.Tk):
             ).pack(anchor="w", pady=(3, 0))
         metrics = tk.Frame(page, bg=INK)
         metrics.pack(fill="x", pady=(0, 10))
-        for label, value, sub in (("Measured mile", f"{result.measured_mile_speed_mph:.1f} mph", f"{result.measured_mile_time_seconds:.1f} s"), ("Peak speed", f"{result.peak_speed_mph:.1f} mph", f"{result.total_time_seconds:.1f} s total"), ("Average acceleration", f"{result.average_acceleration_g:.3f} G", f"{result.gear_change_count} gear changes"), ("Brake temperature", f"{result.maximum_brake_temperature_c:.0f} C", f"{result.wheelspin_event_count} wheelspin events")):
+        for label, value, sub in (("Measured mile", f"{result.measured_mile_speed_mph:.1f} mph", f"{result.measured_mile_time_seconds:.1f} s"), ("Peak speed", f"{result.peak_speed_mph:.1f} mph", f"{result.total_time_seconds:.1f} s total"), ("Average acceleration", f"{result.average_acceleration_g:.3f} G", f"{result.gear_change_count} gear changes"), ("Brake temperature", f"{result.maximum_brake_temperature_c:.0f} C", f"{result.wheelspin_event_count} wheelspin / {getattr(result, 'wheel_lock_event_count', 0)} lock-up events")):
             self.card(metrics, label, value, sub).pack(side="left", fill="both", expand=True, padx=(0, 8))
         self.section(page, "Speed / time")
         measured_mile_markers = []
@@ -2654,6 +2664,39 @@ class BonnevilleApp(tk.Tk):
             bg=INK, fg=ACCENT if self.campaign.projected_next_turn_cash_gbp < 0 else LIME,
             font=(FONT, 11), wraplength=1000, justify="left",
         ).pack(anchor="w", pady=(0, 12))
+        self.section(page, "Driver preparation")
+        tk.Label(
+            page,
+            text=f"Driver skill {self.campaign.driver_skill:.0%}  /  higher skill improves throttle modulation and reduces the chance of brake lock-ups.",
+            bg=INK,
+            fg=MUTED,
+            font=(FONT, 10),
+            wraplength=1000,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 6))
+        if self.campaign.driver_skill >= 1.0:
+            tk.Label(
+                page,
+                text="Driver training is complete.",
+                bg=INK,
+                fg=LIME,
+                font=(FONT, 10, "bold"),
+            ).pack(anchor="w", pady=(0, 12))
+        elif self.campaign.driver_training_this_turn:
+            tk.Label(
+                page,
+                text="The driver has trained this turn. Training reopens after End Turn.",
+                bg=INK,
+                fg=MUTED,
+                font=(FONT, 10),
+            ).pack(anchor="w", pady=(0, 12))
+        else:
+            next_skill = min(1.0, self.campaign.driver_skill + DRIVER_TRAINING_INCREMENT)
+            self.action_button(
+                page,
+                f"TRAIN DRIVER  /  GBP {DRIVER_TRAINING_COST_GBP:,.0f}  /  skill {next_skill:.0%}",
+                self.train_driver_action,
+            )
         self.section(page, "Recruitment")
         for label, cost, wage, action in (
             ("Standard engineer", ENGINEER_HIRE_COST_GBP, ENGINEER_WAGE_GBP, hire_engineer),
@@ -2778,6 +2821,25 @@ class BonnevilleApp(tk.Tk):
             self.last_run_note = success
         except ValueError as exc:
             messagebox.showerror("Action unavailable", str(exc), parent=self)
+        self.show_page("Team")
+
+    def train_driver_action(self):
+        next_skill = min(
+            1.0, self.campaign.driver_skill + DRIVER_TRAINING_INCREMENT
+        )
+        if not messagebox.askyesno(
+            "Train driver",
+            f"Spend GBP {DRIVER_TRAINING_COST_GBP:,.0f} to improve driver skill "
+            f"from {self.campaign.driver_skill:.0%} to {next_skill:.0%}?\n\n"
+            "Training can be purchased once per turn.",
+            parent=self,
+        ):
+            return
+        try:
+            train_driver(self.campaign)
+            save_campaign(self.campaign)
+        except ValueError as exc:
+            messagebox.showerror("Training unavailable", str(exc), parent=self)
         self.show_page("Team")
 
     def sign_sponsor_action(self, sponsor):

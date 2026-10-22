@@ -187,6 +187,17 @@ def suggest_gear_ratio_adjustment(vehicle, result, track_friction_factor=1.0):
 
 def diagnose_run(vehicle, result):
     """Turn run telemetry into one actionable engineering recommendation."""
+    wheel_lock_count = getattr(result, "wheel_lock_event_count", 0)
+    if wheel_lock_count or any(
+        getattr(sample, "wheel_lock", False) for sample in result.telemetry
+    ):
+        return RunDiagnosis(
+            "Wheel lock-up",
+            f"The run recorded {wheel_lock_count} wheel lock-up event(s), risking loss of control.",
+            "brakes",
+            "brake technology",
+        )
+
     if any(sample.brake_fade for sample in result.telemetry):
         return RunDiagnosis(
             "Brake fade",

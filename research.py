@@ -541,7 +541,30 @@ for _definition in ERA_DEFINITIONS:
 CHASSIS_TECHNOLOGY_TREE, ENGINE_TECHNOLOGY_TREE, ERAS = _build_trees(ERA_DEFINITIONS)
 AERODYNAMICS_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "aerodynamics_tiers")
 TYRE_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "tyre_tiers")
-BRAKE_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "brake_tiers")
+BRAKE_TECHNOLOGY_TREE = _build_branch_tree(ERA_DEFINITIONS, "brake_tiers") + (
+    TechnologyNode(
+        "anti_lock_braking",
+        "Anti-lock Braking",
+        "The Jet Age",
+        ("hydraulic_disc_brakes_2", "jet_intake_structural_frame"),
+        30_000.0,
+        3,
+        "Rapidly modulated braking prevents wheel lock and preserves control during high-speed deceleration.",
+        turns_required=4,
+    ),
+)
+ENGINE_TECHNOLOGY_TREE = ENGINE_TECHNOLOGY_TREE + (
+    TechnologyNode(
+        "traction_control",
+        "Traction Control",
+        "The Jet Age",
+        ("gas_turbines", "jet_intake_structural_frame"),
+        30_000.0,
+        3,
+        "Electronic control keeps driven wheels near their best grip, reducing wheelspin in piston and gas-turbine cars.",
+        turns_required=4,
+    ),
+)
 GEARBOX_TECHNOLOGY_TREE = (
     TechnologyNode(
         "computer_optimised_gear_ratios",

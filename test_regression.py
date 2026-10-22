@@ -27,15 +27,17 @@ from diagnostics import (
 from engines import (
     ALL_ENGINES,
     ENGINE_TUNE_STAGES,
+    J47_TURBOJET,
     NAPIER_LION,
     PIONEER_SINGLE_CYLINDER,
+    ROVER_BRM_GAS_TURBINE,
     STANLEY_STEAM_ENGINE,
     WELCH_HEMI,
     available_engines,
     next_engine_tune_stage,
     tune_engine,
 )
-from gearbox import PREBUILT_GEARBOXES, TRANSMISSION_CATALOG
+from gearbox import Gearbox, PREBUILT_GEARBOXES, TRANSMISSION_CATALOG
 from historical_challenges import CHALLENGES, simulate_challenge
 from historical_records import (
     HISTORICAL_TARGETS,
@@ -90,6 +92,7 @@ from research import (
 )
 from reliability import (
     GEAR_FAILURE,
+    WHEEL_LOCK,
     MISFIRE,
     TYRE_BURST,
     calculate_failure_probability,
@@ -1986,6 +1989,172 @@ class EngineeringDiagnosisTests(unittest.TestCase):
         for gearbox in PREBUILT_GEARBOXES + TRANSMISSION_CATALOG:
             self.assertGreater(gearbox.gear_count, 0)
             self.assertGreater(gearbox.final_drive, 0)
+
+
+class DriverControlTests(unittest.TestCase):
+    def test_driver_training_is_paid_limited_per_turn_and_resets_on_end_turn(self):
+        from management import DRIVER_TRAINING_COST_GBP, train_driver
+
+        campaign = CampaignState()
+        starting_cash = campaign.team.cash
+
+        self.assertEqual(train_driver(campaign), 0.4)
+        self.assertEqual(
+            campaign.team.cash,
+            starting_cash - DRIVER_TRAINING_COST_GBP,
+        )
+        with self.assertRaisesRegex(ValueError, "already trained"):
+            train_driver(campaign)
+
+        advance_turn(campaign, days=0)
+
+        self.assertEqual(train_driver(campaign), 0.55)
+
+    def test_thrust_powered_cars_ignore_tyre_grip_for_acceleration(self):
+        results = []
+        for grip in (0.05, 1.0):
+            vehicle = AVAILABLE_CARS["1"]()
+            vehicle.engine = J47_TURBOJET
+            vehicle.power = J47_TURBOJET.power_hp
+            vehicle.peak_torque_nm = J47_TURBOJET.torque_nm
+            vehicle.gearbox = Gearbox(
+                "Jet direct drive", (1.0,), final_drive=2.25
+            )
+            vehicle.tyre_grip_factor = grip
+            results.append(
+                run_simulation(
+                    vehicle,
+                    track_miles=5.0,
+                    measured_mile_start=1.0,
+                    measured_mile_length=1.0,
+                    driver_skill=0.25,
+                    traction_control=True,
+                )
+            )
+
+        self.assertEqual(
+            results[0].measured_mile_speed_mph,
+            results[1].measured_mile_speed_mph,
+        )
+        self.assertEqual(results[0].peak_speed_mph, results[1].peak_speed_mph)
+        self.assertEqual(results[0].wheelspin_event_count, 0)
+
+    def test_driver_skill_and_traction_control_reduce_wheelspin_loss(self):
+        measured_speeds = []
+        event_counts = []
+        for skill, traction_control in ((0.25, False), (1.0, False), (0.25, True)):
+            vehicle = AVAILABLE_CARS["1"]()
+            vehicle.tyre_grip_factor = 0.1
+            result = run_simulation(
+                vehicle,
+                track_miles=5.0,
+                measured_mile_start=1.0,
+                measured_mile_length=1.0,
+                driver_skill=skill,
+                traction_control=traction_control,
+            )
+            measured_speeds.append(result.measured_mile_speed_mph)
+            event_counts.append(result.wheelspin_event_count)
+
+        self.assertLess(measured_speeds[0], measured_speeds[1])
+        self.assertEqual(measured_speeds[1], measured_speeds[2])
+        self.assertEqual(event_counts[1], 0)
+        self.assertEqual(event_counts[2], 0)
+
+    def test_anti_lock_brakes_prevent_lock_and_restore_deceleration(self):
+        from brakes import CARBON_BRAKES
+
+        results = []
+        for anti_lock_brakes, driver_skill in (
+            (False, 0.25),
+            (True, 0.25),
+            (False, 1.0),
+        ):
+            vehicle = AVAILABLE_CARS["1"]()
+            vehicle.tyre_grip_factor = 0.1
+            vehicle.brakes = CARBON_BRAKES
+            results.append(
+                run_simulation(
+                    vehicle,
+                    track_miles=5.0,
+                    measured_mile_start=1.0,
+                    measured_mile_length=1.0,
+                    driver_skill=driver_skill,
+                    anti_lock_brakes=anti_lock_brakes,
+                )
+            )
+
+        self.assertGreater(results[0].wheel_lock_event_count, 0)
+        self.assertEqual(results[1].wheel_lock_event_count, 0)
+        self.assertEqual(results[2].wheel_lock_event_count, 0)
+        self.assertGreater(
+            results[1].average_deceleration_g,
+            results[0].average_deceleration_g,
+        )
+
+    def test_gas_turbine_is_wheel_driven_and_controls_are_researchable(self):
+        from research import available_brake_technologies
+
+        self.assertEqual(ROVER_BRM_GAS_TURBINE.torque_curve_type, "gas_turbine")
+        self.assertIn(
+            ROVER_BRM_GAS_TURBINE,
+            available_engines(("gas_turbines",)),
+        )
+        turbine_results = []
+        for traction_control in (False, True):
+            vehicle = AVAILABLE_CARS["1"]()
+            vehicle.engine = ROVER_BRM_GAS_TURBINE
+            vehicle.power = ROVER_BRM_GAS_TURBINE.power_hp
+            vehicle.peak_torque_nm = ROVER_BRM_GAS_TURBINE.torque_nm
+            vehicle.tyre_grip_factor = 0.1
+            turbine_results.append(
+                run_simulation(
+                    vehicle,
+                    track_miles=5.0,
+                    measured_mile_start=1.0,
+                    measured_mile_length=1.0,
+                    driver_skill=0.25,
+                    traction_control=traction_control,
+                )
+            )
+        self.assertGreater(turbine_results[0].wheelspin_event_count, 0)
+        self.assertEqual(turbine_results[1].wheelspin_event_count, 0)
+        self.assertIn(
+            "traction_control",
+            {
+                node.technology_id
+                for node in available_engine_technologies(
+                    ("gas_turbines",), ("jet_intake_structural_frame",)
+                )
+            },
+        )
+        self.assertIn(
+            "anti_lock_braking",
+            {
+                node.technology_id
+                for node in available_brake_technologies(
+                    ("hydraulic_disc_brakes_2",),
+                    ("jet_intake_structural_frame",),
+                )
+            },
+        )
+
+    def test_high_speed_lockup_can_cause_nonrepairable_incident(self):
+        from condition import assess_incident_damage
+        from management import Team
+
+        outcome = resolve_run_failure(
+            ROVER_BRM_GAS_TURBINE,
+            350.0,
+            Team(),
+            random_value=0.92,
+            gearbox=Gearbox("Reliable", (1.0,), reliability=1.0),
+            wheel_lock_event_count=10,
+        )
+
+        self.assertEqual(outcome.failure_type, WHEEL_LOCK)
+        self.assertFalse(outcome.repaired)
+        self.assertGreater(assess_incident_damage(WHEEL_LOCK, 350.0).damage, 60.0)
 
 
 class HistoricalChallengeRegressionTests(unittest.TestCase):

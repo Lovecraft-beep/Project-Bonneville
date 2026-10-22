@@ -68,6 +68,8 @@ WORKSHOP_UPGRADE_BASE_COST_GBP = 10_000.0
 TRACKSIDE_ADJUSTMENT_COST_GBP = 5.0
 MAX_TESTS_PER_SESSION = 8
 MAX_RECORD_RUNS_PER_SESSION = 8
+DRIVER_TRAINING_COST_GBP = 1_000.0
+DRIVER_TRAINING_INCREMENT = 0.15
 WAR_TIME_PAUSES = ((1914, 1918, 1919), (1939, 1946, 1947))
 ENGINE_TUNE_COST_FACTORS = {1: 0.05, 2: 0.10, 3: 0.15}
 DEVELOPMENT_PROGRAMS = {
@@ -354,6 +356,8 @@ class CampaignState:
     development_programs: dict[str, str] = field(default_factory=dict)
     engine_tune_stages: dict[str, int] = field(default_factory=dict)
     engine_tunes_this_turn: int = 0
+    driver_skill: float = 0.25
+    driver_training_this_turn: bool = False
     turn_number: int = 1
     tests_this_session: int = 0
     record_runs_this_session: int = 0
@@ -768,6 +772,24 @@ def complete_failed_run(campaign, run_cost_gbp):
     campaign.failed_runs += 1
 
 
+def train_driver(campaign):
+    """Train the driver once per campaign turn for a fee."""
+    if campaign.driver_training_this_turn:
+        raise ValueError("the driver has already trained this turn")
+    if campaign.driver_skill >= 1.0:
+        raise ValueError("the driver has reached maximum skill")
+    if campaign.team.cash < DRIVER_TRAINING_COST_GBP:
+        raise ValueError("the team cannot afford driver training")
+    campaign.team.cash = round(
+        campaign.team.cash - DRIVER_TRAINING_COST_GBP, 2
+    )
+    campaign.driver_skill = round(
+        min(1.0, campaign.driver_skill + DRIVER_TRAINING_INCREMENT), 2
+    )
+    campaign.driver_training_this_turn = True
+    return campaign.driver_skill
+
+
 def advance_turn(campaign, days=None):
     """Advance a season, fast-forwarding over wartime pauses in record activity."""
     automatic_season_advance = days is None
@@ -810,6 +832,7 @@ def advance_turn(campaign, days=None):
         campaign.tests_this_session = 0
         campaign.record_runs_this_session = 0
         campaign.engine_tunes_this_turn = 0
+        campaign.driver_training_this_turn = False
         campaign.workshop_repair_pending = False
         campaign.venues_paid_this_session = []
 

@@ -91,6 +91,11 @@ End Turn pays sponsor income and deducts the full wage bill. If cash falls below
 zero, the deficit remains visible and new spending is restricted by affordability;
 turns can still advance while the team reduces staffing or secures funding.
 
+Driver skill starts at 25%. The Team page lets you train once per turn for
+GBP 1,000, gaining 15 percentage points up to 100%. Skill improves throttle
+modulation and braking control; it is especially valuable before traction
+control and anti-lock braking are researched.
+
 ### Sponsorship Objectives
 
 Castrol and Dunlop are ongoing technical partnerships rather than run quotas.
@@ -456,10 +461,14 @@ factor and track friction factor:
 effective traction = tyre grip factor * track friction factor
 ```
 
-Engine torque is multiplied by the first-gear and final-drive ratios, then
-converted to wheel force using wheel radius. If requested wheel force is
-greater than effective traction, the telemetry reports wheelspin and actual
-vehicle acceleration is capped by the track surface.
+For piston, steam, and wheel-driven gas-turbine engines, engine torque is
+multiplied by the first-gear and final-drive ratios, then converted to wheel
+force using wheel radius. Inexperienced drivers can spin the wheels when they
+over-apply power; wheelspin reduces usable force and is recorded in telemetry.
+Driver training reduces this loss, while later Traction Control research
+modulates power automatically. Turbojets and rockets propel the chassis with
+thrust, so tyre grip does not limit their acceleration or top speed and they
+do not produce powered-wheel wheelspin.
 
 At higher speed, engine power and aerodynamic drag determine acceleration.
 During the deceleration phase, braking, aerodynamic drag, and rolling
@@ -467,14 +476,16 @@ resistance reduce speed.
 
 The brake system has its own mechanical efficiency and maximum braking
 capability. Actual brake force is limited by available tyre and track grip.
-Brake temperature increases with braking energy and decreases through cooling;
-above the fade threshold, usable brake force is reduced. Aerodynamic braking
-is calculated separately from the drag equation and becomes stronger as speed
-increases.
+An inexperienced driver can lock the wheels when brake demand exceeds their
+modulation threshold; a locked wheel slides with greatly reduced braking force
+and risks a major high-speed incident. Driver training improves control, and
+later Anti-lock Braking research prevents lock-ups. Brake temperature increases
+with braking energy and decreases through cooling; above the fade threshold,
+usable brake force is reduced. Aerodynamic braking is calculated separately
+from the drag equation and becomes stronger as speed increases.
 
-This is intentionally an early model. It does not yet include engine torque
-curves, wind, gradients, tyre temperature, stability, weather, driver skill,
-component failures, carbon brakes, or brake chutes.
+This is intentionally an early model. It does not yet include wind, gradients,
+tyre temperature, stability, weather, or brake chutes.
 
 ## Telemetry
 

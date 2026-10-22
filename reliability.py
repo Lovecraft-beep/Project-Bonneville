@@ -23,8 +23,9 @@ GEAR_FAILURE = FailureType("gear_failure", "Gear failure")
 TYRE_BURST = FailureType("tyre_burst", "Tyre burst")
 BRAKE_FADE = FailureType("brake_fade", "Brake fade")
 STEERING_VIBRATION = FailureType("steering_vibration", "Steering vibration")
+WHEEL_LOCK = FailureType("wheel_lock", "Wheel lock-up")
 MAJOR_FAILURE_IDS = frozenset(
-    {GEAR_FAILURE.failure_id, TYRE_BURST.failure_id}
+    {GEAR_FAILURE.failure_id, TYRE_BURST.failure_id, WHEEL_LOCK.failure_id}
 )
 
 
@@ -86,6 +87,7 @@ def resolve_run_failure(
     brake_fade=False,
     sponsor_reliability_bonus=0.0,
     failure_risk_multiplier=1.0,
+    wheel_lock_event_count=0,
 ):
     """Resolve a named failure and whether the team can repair it trackside."""
     engine_failure_probability = calculate_failure_probability(
@@ -113,6 +115,14 @@ def resolve_run_failure(
             (0.20 if brake_fade else 0.01) * speed_factor * team_skill_modifier,
         ),
         (STEERING_VIBRATION, 0.015 * speed_factor * team_skill_modifier),
+        (
+            WHEEL_LOCK,
+            min(
+                0.9,
+                max(0, wheel_lock_event_count)
+                * (0.05 + 0.35 * speed_factor),
+            ),
+        ),
     ]
     failure_events = [
         (failure_type, probability * max(0.0, failure_risk_multiplier))

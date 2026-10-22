@@ -39,6 +39,7 @@ class Engine:
             "early_piston",
             "supercharged_piston",
             "steam",
+            "gas_turbine",
             "turbojet",
             "rocket",
         }:
@@ -77,6 +78,13 @@ class Engine:
                 (0.50, 0.95),
                 (0.80, 0.90),
                 (1.0, 0.80),
+            ),
+            "gas_turbine": (
+                (0.0, 0.45),
+                (0.25, 0.65),
+                (0.60, 0.90),
+                (0.85, 1.00),
+                (1.0, 0.95),
             ),
             "turbojet": (
                 (0.0, 0.70),
@@ -260,6 +268,22 @@ AVON_TURBOJET = Engine(
     required_technology="gas_turbines",
 )
 
+ROVER_BRM_GAS_TURBINE = Engine(
+    name="Rover-BRM Gas Turbine",
+    cylinders=0,
+    power_hp=450.0,
+    torque_nm=450.0,
+    max_rpm=6_000,
+    mass_kg=320.0,
+    reliability=0.78,
+    configuration="free-power-turbine road-racing engine",
+    era="1963",
+    base_cost_gbp=12_000,
+    rarity_factor=1.5,
+    torque_curve_type="gas_turbine",
+    required_technology="gas_turbines",
+)
+
 
 XLR99_ROCKET = Engine(
     name="XLR99 Rocket",
@@ -305,6 +329,7 @@ ALL_ENGINES = (
     ROLLS_ROYCE_R,
     J47_TURBOJET,
     AVON_TURBOJET,
+    ROVER_BRM_GAS_TURBINE,
     XLR99_ROCKET,
     EJ200_TURBOFAN,
 )

@@ -35,6 +35,7 @@ def assess_incident_damage(failure_type, speed_mph):
         "tyre_burst": (15.0, 85.0),
         "brake_fade": (5.0, 65.0),
         "steering_vibration": (3.0, 60.0),
+        "wheel_lock": (12.0, 90.0),
     }
     base, speed_damage = severity[failure_type.failure_id]
     damage = round(min(100.0, base + speed_damage * (max(0.0, speed_mph) / 400.0) ** 2), 2)
