@@ -426,7 +426,7 @@ class BonnevilleApp(tk.Tk):
         target = record_chase_target(self.campaign)
         self.page_title(
             page,
-            "Operations / Phase",
+            "Operations / Season",
             f"{self.campaign.team.name}",
             f"{self.campaign.current_season} {self.campaign.current_year}  |  Turn {self.campaign.turn_number}  |  {self.campaign.completed_runs} completed runs  |  {self.campaign.failed_runs} failed",
         )
@@ -464,9 +464,9 @@ class BonnevilleApp(tk.Tk):
         tk.Label(
             page,
             text=(
-                f"Payroll GBP {self.campaign.team.payroll_per_turn_gbp:,.0f}/half-year  /  "
-                f"Net cash flow GBP {self.campaign.cash_flow_per_turn_gbp:+,.0f}/half-year  /  "
-                f"Next-half-year balance GBP {self.campaign.projected_next_turn_cash_gbp:,.0f}"
+                f"Payroll GBP {self.campaign.team.payroll_per_turn_gbp:,.0f}/turn  /  "
+                f"Net cash flow GBP {self.campaign.cash_flow_per_turn_gbp:+,.0f}/turn  /  "
+                f"Next-turn balance GBP {self.campaign.projected_next_turn_cash_gbp:,.0f}"
             ),
             bg=INK, fg=ACCENT if self.campaign.projected_next_turn_cash_gbp < 0 else MUTED,
             font=(FONT, 10), wraplength=1000, justify="left",
@@ -479,15 +479,10 @@ class BonnevilleApp(tk.Tk):
         left.pack(side="left", fill="both", expand=True, padx=(0, 28))
         right.pack(side="left", fill="both", expand=True)
         self.section(left, "Next actions")
-        if self.campaign.current_season == "Development":
-            self.action_button(left, "Design a vehicle", self.start_vehicle_builder, True)
-            self.action_button(left, "Open research tree", lambda: self.show_page("Research"))
-            next_phase_label = "Begin Competition season"
-        else:
-            self.action_button(left, "Prepare a test run", lambda: self.show_page("Test Runs"), True)
-            self.action_button(left, "Open research tree", lambda: self.show_page("Research"))
-            next_phase_label = "Begin Development season"
-        self.action_button(left, next_phase_label, self.end_turn)
+        self.action_button(left, "Prepare a test run", lambda: self.show_page("Test Runs"), True)
+        self.action_button(left, "Design a vehicle", self.start_vehicle_builder)
+        self.action_button(left, "Open research tree", lambda: self.show_page("Research"))
+        self.action_button(left, "End turn", self.end_turn)
         if self.campaign.engineering_projects:
             self.section(page, "Engineering projects in progress")
             for project in self.campaign.engineering_projects:
@@ -508,14 +503,8 @@ class BonnevilleApp(tk.Tk):
                 else f"{target.speed_mph:.1f} mph target  |  {gap:.1f} mph to go\n{target.milestone}"
             )
             tk.Label(right, text=objective, bg=INK, fg=MUTED, font=(FONT, 10), wraplength=470, justify="left").pack(anchor="w", pady=8)
-            if self.campaign.current_season == "Competition":
-                action = "Set inaugural record" if target.record_id == INAUGURAL_RECORD_TARGET_ID else "Attempt official record"
-                self.action_button(right, action, self.start_record_attempt, True)
-            else:
-                tk.Label(
-                    right, text="Official record attempts open in the Competition season.",
-                    bg=INK, fg=MUTED, font=(FONT, 10), wraplength=470, justify="left",
-                ).pack(anchor="w", pady=8)
+            action = "Set inaugural record" if target.record_id == INAUGURAL_RECORD_TARGET_ID else "Attempt official record"
+            self.action_button(right, action, self.start_record_attempt, True)
         else:
             tk.Label(right, text="No faster rival record has been set yet.", bg=INK, fg=LIME, font=(FONT, 13, "bold")).pack(anchor="w")
         self.section(page, "Sponsor demands")
@@ -541,9 +530,7 @@ class BonnevilleApp(tk.Tk):
 
     def render_research(self):
         page = self.scroll_area()
-        in_development = self.campaign.current_season == "Development"
-        phase_note = "Development season / projects can be started" if in_development else "Competition season / new projects open next Development season"
-        self.page_title(page, "Research & development", "Engineering projects", f"{phase_note}. Commit to one major program per historical era; active projects progress at each End Turn.")
+        self.page_title(page, "Research & development", "Engineering projects", "Commit to one major program per historical era, then fund projects to reserve engineers. Projects advance each turn and unlock when their schedule is complete.")
         tk.Label(
             page,
             text=f"Engineers available: {self.campaign.available_engineers} of {self.campaign.team.engineers}  /  GBP {self.campaign.team.cash:,.0f} available",
@@ -575,8 +562,7 @@ class BonnevilleApp(tk.Tk):
         else:
             tk.Label(
                 page,
-                text=("Choose one direction for this era. The commitment cannot be changed until the next era."
-                      if in_development else "A major program can be selected during the next Development season."),
+                text="Choose one direction for this era. The commitment cannot be changed until the next era.",
                 bg=INK,
                 fg=MUTED,
                 font=(FONT, 10),
@@ -604,12 +590,11 @@ class BonnevilleApp(tk.Tk):
                     wraplength=760,
                     justify="left",
                 ).pack(anchor="w", pady=(3, 0))
-                if in_development:
-                    self.action_button(
-                        frame,
-                        "COMMIT",
-                        lambda selected=program_id: self.commit_development_program(selected),
-                    )
+                self.action_button(
+                    frame,
+                    "COMMIT",
+                    lambda selected=program_id: self.commit_development_program(selected),
+                )
         if self.campaign.engineering_projects:
             self.section(page, "Active projects")
             for project in self.campaign.engineering_projects:
@@ -679,14 +664,12 @@ class BonnevilleApp(tk.Tk):
             project.technology_id
             for project in self.campaign.engineering_projects
         }
-        in_development = self.campaign.current_season == "Development"
         ready = [
             node
             for node in tree
             if node.technology_id not in researched_set
             and node.technology_id not in active_ids
             and set(node.prerequisites).issubset(combined)
-            and in_development
             and not (node.era == self.campaign.current_era and program_missing)
         ]
         for node in tree:
@@ -699,7 +682,7 @@ class BonnevilleApp(tk.Tk):
                 and program_missing
                 and prerequisites_met
             )
-            status = "COMPLETE" if is_done else "IN PROGRESS" if project else "PROGRAM REQUIRED" if needs_program else "AVAILABLE" if is_ready else "DEVELOPMENT SEASON REQUIRED" if not in_development and prerequisites_met else "LOCKED"
+            status = "COMPLETE" if is_done else "IN PROGRESS" if project else "PROGRAM REQUIRED" if needs_program else "AVAILABLE" if is_ready else "LOCKED"
             cost, turns = engineering_project_terms(self.campaign, branch_key, node)
             card = tk.Frame(parent, bg=PANEL, padx=16, pady=13)
             card.pack(fill="x", pady=4)
@@ -714,8 +697,6 @@ class BonnevilleApp(tk.Tk):
                 tk.Button(row, text="START PROJECT", command=lambda tech=node: self.research(tech), bg=ACCENT, fg=INK, activebackground=LIME, relief="flat", borderwidth=0, font=(FONT, 9, "bold"), padx=14, pady=10, cursor="hand2").pack(side="right", padx=(12, 0))
             elif project:
                 tk.Label(row, text=f"{project.turns_remaining} TURNS LEFT", bg=PANEL, fg=LIME, font=(FONT, 9, "bold")).pack(side="right", padx=12)
-            elif not in_development and prerequisites_met and not is_done:
-                tk.Label(row, text="DEVELOPMENT SEASON", bg=PANEL, fg=MUTED, font=(FONT, 9, "bold")).pack(side="right", padx=12)
             elif not is_done:
                 tk.Label(row, text="LOCKED", bg=PANEL, fg=MUTED, font=(FONT, 9, "bold")).pack(side="right", padx=12)
 
@@ -804,13 +785,11 @@ class BonnevilleApp(tk.Tk):
             return
         if not messagebox.askyesno(
             "End turn",
-            f"End {self.campaign.current_season} {self.campaign.current_year}?\n"
-            f"Next phase: {'Competition' if self.campaign.current_season == 'Development' else 'Development'} "
-            f"{self.campaign.current_year if self.campaign.current_season == 'Development' else self.campaign.current_year + 1}.\n\n"
-            f"Sponsor income: GBP {self.campaign.sponsorship.income_per_turn_gbp:,.0f}/half-year\n"
-            f"Staff wages: GBP {self.campaign.team.payroll_per_turn_gbp:,.0f}/half-year\n"
+            f"End {self.campaign.current_season} {self.campaign.current_year}?\n\n"
+            f"Sponsor income: GBP {self.campaign.sponsorship.income_per_turn_gbp:,.0f}\n"
+            f"Staff wages: GBP {self.campaign.team.payroll_per_turn_gbp:,.0f}\n"
             f"Projected balance: GBP {self.campaign.projected_next_turn_cash_gbp:,.0f}\n\n"
-            "Testing is available only in Competition.",
+            "Research, vehicle construction, and workshop jobs progress; rivals make their scheduled attempts, and the test session closes.",
             parent=self,
         ):
             return
@@ -820,15 +799,11 @@ class BonnevilleApp(tk.Tk):
 
     def render_garage(self):
         page = self.scroll_area()
-        in_development = self.campaign.current_season == "Development"
-        phase_detail = "Order, service, and prepare vehicles" if in_development else "Inspect the fleet; test prepared vehicles in Competition"
-        self.page_title(page, "Vehicle department", "Garage", f"{phase_detail}. Development and track activity use separate half-year phases.")
-        if self.campaign.record_attempt is not None:
-            tk.Label(page, text="An official record attempt is active. New designs are unavailable until its return run is complete.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w", pady=(0, 10))
-        elif in_development:
+        self.page_title(page, "Vehicle department", "Garage", "Active campaign vehicles retain their installed components between tests. Select a vehicle to inspect, tune, or replace components.")
+        if self.campaign.record_attempt is None:
             self.action_button(page, "+  DESIGN NEW VEHICLE", self.start_vehicle_builder, True)
         else:
-            tk.Label(page, text=f"New construction and component changes reopen in the Development season of {self.campaign.current_year + 1}.", bg=INK, fg=MUTED, font=(FONT, 10)).pack(anchor="w", pady=(0, 10))
+            tk.Label(page, text="An official record attempt is active. New designs are unavailable until its return run is complete.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w", pady=(0, 10))
         if self.campaign.vehicle_construction:
             self.section(page, "Under construction")
             for project in self.campaign.vehicle_construction:
@@ -850,12 +825,12 @@ class BonnevilleApp(tk.Tk):
                     wraplength=980, justify="left",
                 ).pack(anchor="w", pady=(4, 0))
         if not self.campaign.garage.vehicles:
+            self.section(page, "No active vehicles")
             empty_text = (
                 "Awaiting construction completion."
                 if self.campaign.vehicle_construction
                 else "No vehicles in service."
             )
-            self.section(page, "No active vehicles")
             tk.Label(page, text=empty_text, bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w")
         else:
             self.section(page, f"{len(self.campaign.garage.vehicles)} vehicles")
@@ -987,20 +962,6 @@ class BonnevilleApp(tk.Tk):
             self.action_button(page, "OPEN TRACKSIDE SERVICE", lambda: self.show_page("Trackside Modifications"), True)
             self.action_button(page, "RETURN TO RECORD ATTEMPT", lambda: self.show_page("Team Debrief"))
             return
-        if self.campaign.current_season == "Competition":
-            self.section(page, "Competition season")
-            reason = vehicle_unavailable_reason(entry)
-            if reason:
-                tk.Label(page, text=reason, bg=INK, fg=ACCENT, font=(FONT, 10), wraplength=700).pack(anchor="w", pady=6)
-            else:
-                self.action_button(page, "TEST THIS VEHICLE", lambda: self.choose_track_for_vehicle(entry), True)
-            tk.Label(
-                page,
-                text="Vehicle design, replacement, tuning, and paid workshop work reopen in the Development season.",
-                bg=INK, fg=MUTED, font=(FONT, 10), wraplength=700, justify="left",
-            ).pack(anchor="w", pady=(8, 0))
-            self.action_button(page, "BACK TO GARAGE", lambda: self.show_page("Garage"))
-            return
         self.section(page, "Workshop controls")
         if entry.workshop_turns_remaining:
             tk.Label(
@@ -1016,10 +977,7 @@ class BonnevilleApp(tk.Tk):
             self.action_button(page, "RETIRE TO MUSEUM", lambda: self.retire_garage_vehicle(entry))
             self.action_button(page, "BACK TO GARAGE", lambda: self.show_page("Garage"))
             return
-        tk.Label(
-            page, text="Testing opens in the Competition season.",
-            bg=INK, fg=MUTED, font=(FONT, 10), wraplength=700,
-        ).pack(anchor="w", pady=(0, 8))
+        self.action_button(page, "TEST THIS VEHICLE", lambda: self.choose_track_for_vehicle(entry), True)
         self.action_button(page, "Replace engine", lambda: self.choose_component(entry, "engine"))
         self.action_button(page, "Replace gearbox", lambda: self.choose_component(entry, "gearbox"))
         self.action_button(page, "Replace brakes", lambda: self.choose_component(entry, "brakes"))
@@ -1163,7 +1121,7 @@ class BonnevilleApp(tk.Tk):
             "Confirm engine tuning",
             f"Apply Stage {stage} to {entry.engine_name} for GBP {cost:,.0f}?\n\n"
             f"Reliability penalty: -{reliability_penalty:.0%}\n"
-            "Only one engine tune can be applied each half-year turn.",
+            "Only one engine tune can be applied this turn.",
             parent=self,
         ):
             return
@@ -1292,13 +1250,6 @@ class BonnevilleApp(tk.Tk):
         self.tune_vehicle_gearbox(entry)
 
     def start_vehicle_builder(self):
-        if self.campaign.current_season != "Development":
-            messagebox.showinfo(
-                "Development season",
-                "New vehicle construction orders open during Development.",
-                parent=self,
-            )
-            return
         if self.campaign.record_attempt is not None:
             messagebox.showerror(
                 "Record attempt in progress",
@@ -1551,16 +1502,7 @@ class BonnevilleApp(tk.Tk):
 
     def render_test_runs(self):
         page = self.scroll_area()
-        self.page_title(page, "Track operations", "Prepare a test run", "Testing and official record attempts are available during the Competition season.")
-        if self.campaign.current_season != "Competition":
-            self.section(page, "Development season")
-            tk.Label(
-                page,
-                text=f"Campaign testing and record attempts reopen in the Competition season later in {self.campaign.current_year}. Use this season for research, construction, staffing, tuning, and workshop work.",
-                bg=INK, fg=MUTED, font=(FONT, 11), wraplength=900, justify="left",
-            ).pack(anchor="w", pady=8)
-            self.action_button(page, "END DEVELOPMENT SEASON", self.end_turn, True)
-            return
+        self.page_title(page, "Track operations", "Prepare a test run", "Select a garage vehicle, then an available circuit. The simulation, costs, reliability checks, records, and campaign turn are unchanged.")
         if self.garage_return_required:
             self.section(page, "Workshop repair required")
             tk.Label(page, text="A major failure must be inspected in the Garage before campaign testing can continue.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w")
@@ -1698,9 +1640,6 @@ class BonnevilleApp(tk.Tk):
         self.action_button(page, "BACK", lambda: self.show_page("Test Runs"))
 
     def start_record_attempt(self):
-        if self.campaign.current_season != "Competition":
-            messagebox.showinfo("Competition season", "Official record attempts open during the Competition season.", parent=self)
-            return
         if self.campaign.record_attempt is not None:
             self.resume_record_attempt()
             return
@@ -1773,13 +1712,6 @@ class BonnevilleApp(tk.Tk):
         waive_venue_fee=False,
         record_target=None,
     ):
-        if self.campaign.current_season != "Competition":
-            messagebox.showerror(
-                "Development season",
-                "Campaign tests and record attempts are only available during the Competition season.",
-                parent=self,
-            )
-            return
         if self.garage_return_required:
             messagebox.showerror(
                 "Workshop repair required",
@@ -2065,10 +1997,7 @@ class BonnevilleApp(tk.Tk):
         self.page_title(page, "Racing department / team debrief", "Chief Engineer Report")
         if self.last_report is None:
             tk.Label(page, text="No run to review.", bg=INK, fg=MUTED, font=(FONT, 11)).pack(anchor="w", pady=16)
-            if self.campaign.current_season == "Competition":
-                self.action_button(page, "PREPARE A TEST RUN", lambda: self.show_page("Test Runs"), True)
-            else:
-                self.action_button(page, "END DEVELOPMENT SEASON", self.end_turn, True)
+            self.action_button(page, "PREPARE A TEST RUN", lambda: self.show_page("Test Runs"), True)
             self.action_button(page, "OPEN TEST FACILITY", lambda: self.show_page("Test Facility"))
             return
         report = self.last_report
@@ -2229,14 +2158,11 @@ class BonnevilleApp(tk.Tk):
         else:
             self.action_button(page, f"REVIEW {report.research_branch.upper()} RESEARCH", lambda: self.set_research_branch(report.research_branch), True)
             self.action_button(page, "TRACKSIDE MODIFICATIONS", lambda: self.show_page("Trackside Modifications"))
-            if self.campaign.current_season == "Competition":
-                self.action_button(page, "PREPARE NEXT TEST", lambda: self.show_page("Test Runs"))
-                if self.last_run_was_record_attempt:
-                    self._offer_another_record_attempt(page)
-                elif report.completed and self.campaign.garage.vehicles and record_chase_target(self.campaign):
-                    self.action_button(page, "PLAN RECORD ATTEMPT", self.start_record_attempt)
-            else:
-                self.action_button(page, "END DEVELOPMENT SEASON", self.end_turn, True)
+            self.action_button(page, "PREPARE NEXT TEST", lambda: self.show_page("Test Runs"))
+            if self.last_run_was_record_attempt:
+                self._offer_another_record_attempt(page)
+            elif report.completed and self.campaign.garage.vehicles and record_chase_target(self.campaign):
+                self.action_button(page, "PLAN RECORD ATTEMPT", self.start_record_attempt)
 
     def _offer_another_record_attempt(self, page):
         if record_chase_target(self.campaign) is None:
@@ -2277,14 +2203,6 @@ class BonnevilleApp(tk.Tk):
         if self.last_run_is_sandbox or entry is None:
             self.page_title(page, "Trackside service", "No campaign vehicle", "Run a campaign vehicle test to open trackside modifications.")
             self.action_button(page, "BACK TO DEBRIEF", lambda: self.show_page("Team Debrief"))
-            return
-
-        if self.campaign.current_season != "Competition":
-            self.page_title(
-                page, "Workshop controls", "Development season",
-                "Trackside adjustments reopen in the Competition season. Use the Development season for paid workshop repairs and preparation.",
-            )
-            self.action_button(page, "OPEN GARAGE", lambda: self.open_garage_vehicle(entry), True)
             return
 
         reason = vehicle_unavailable_reason(entry)
@@ -2725,27 +2643,17 @@ class BonnevilleApp(tk.Tk):
         page = self.scroll_area()
         team = self.campaign.team
         self.page_title(page, "People & facilities", "Team management", f"{self.campaign.available_engineers} of {team.engineers} engineers available  /  {self.campaign.allocated_engineers} assigned to projects  /  {team.mechanics} mechanics  /  workshop level {team.workshop_level}")
-        self.section(page, "Half-year finances")
+        self.section(page, "Seasonal finances")
         tk.Label(
             page,
             text=(
-                f"Cash GBP {team.cash:,.0f}  /  Sponsor income GBP {self.campaign.sponsorship.income_per_turn_gbp:,.0f}/half-year\n"
-                f"Payroll GBP {team.payroll_per_turn_gbp:,.0f}/half-year  /  Net GBP {self.campaign.cash_flow_per_turn_gbp:+,.0f}/half-year\n"
-                f"Projected next-half-year balance GBP {self.campaign.projected_next_turn_cash_gbp:,.0f}"
+                f"Cash GBP {team.cash:,.0f}  /  Sponsor income GBP {self.campaign.sponsorship.income_per_turn_gbp:,.0f}/turn\n"
+                f"Payroll GBP {team.payroll_per_turn_gbp:,.0f}/turn  /  Net GBP {self.campaign.cash_flow_per_turn_gbp:+,.0f}/turn\n"
+                f"Projected next-turn balance GBP {self.campaign.projected_next_turn_cash_gbp:,.0f}"
             ),
             bg=INK, fg=ACCENT if self.campaign.projected_next_turn_cash_gbp < 0 else LIME,
             font=(FONT, 11), wraplength=1000, justify="left",
         ).pack(anchor="w", pady=(0, 12))
-        if self.campaign.current_season == "Competition":
-            self.section(page, "Competition season")
-            tk.Label(
-                page,
-                text=f"Recruitment, sponsor negotiations, facility upgrades, tuning, and paid workshop work reopen in the Development season of {self.campaign.current_year + 1}.",
-                bg=INK, fg=MUTED, font=(FONT, 10), wraplength=1000, justify="left",
-            ).pack(anchor="w", pady=(0, 12))
-            self.section(page, "Active sponsor demands")
-            self._render_sponsor_objectives(page)
-            return
         self.section(page, "Recruitment")
         for label, cost, wage, action in (
             ("Standard engineer", ENGINEER_HIRE_COST_GBP, ENGINEER_WAGE_GBP, hire_engineer),
@@ -2753,7 +2661,7 @@ class BonnevilleApp(tk.Tk):
             ("Experienced mechanic", EXPERIENCED_MECHANIC_HIRE_COST_GBP, EXPERIENCED_MECHANIC_WAGE_GBP, hire_experienced_mechanic),
         ):
             self.action_button(
-                page, f"Hire {label} / GBP {cost:,.0f} + GBP {wage:,.0f}/half-year",
+                page, f"Hire {label} / GBP {cost:,.0f} + GBP {wage:,.0f}/turn",
                 lambda selected=action, name=label, fee=cost, salary=wage:
                     self.hire_staff_action(selected, name, fee, salary),
             )
@@ -2772,7 +2680,7 @@ class BonnevilleApp(tk.Tk):
         menu.pack(anchor="w", pady=(4, 0))
         self.action_button(
             page,
-            f"Hire specialist engineer / GBP {SPECIALIST_HIRE_COST_GBP:,.0f} + GBP {SPECIALIST_WAGE_GBP:,.0f}/half-year",
+            f"Hire specialist engineer / GBP {SPECIALIST_HIRE_COST_GBP:,.0f} + GBP {SPECIALIST_WAGE_GBP:,.0f}/turn",
             lambda: self.hire_staff_action(
                 lambda campaign: hire_specialist_engineer(campaign, specialty_labels[specialty.get()]),
                 f"{specialty.get()} specialist", SPECIALIST_HIRE_COST_GBP, SPECIALIST_WAGE_GBP,
@@ -2787,9 +2695,9 @@ class BonnevilleApp(tk.Tk):
         ordinary_mechanics = team.mechanics - team.experienced_mechanics
         tk.Label(
             page,
-            text=(f"Standard engineers {ordinary_engineers} / GBP {ENGINEER_WAGE_GBP:,.0f} each per half-year\n"
-                f"Standard mechanics {ordinary_mechanics} / GBP {MECHANIC_WAGE_GBP:,.0f} each per half-year\n"
-                f"Experienced mechanics {team.experienced_mechanics} / GBP {EXPERIENCED_MECHANIC_WAGE_GBP:,.0f} each per half-year"),
+            text=(f"Standard engineers {ordinary_engineers} / GBP {ENGINEER_WAGE_GBP:,.0f} each per turn\n"
+                  f"Standard mechanics {ordinary_mechanics} / GBP {MECHANIC_WAGE_GBP:,.0f} each per turn\n"
+                  f"Experienced mechanics {team.experienced_mechanics} / GBP {EXPERIENCED_MECHANIC_WAGE_GBP:,.0f} each per turn"),
             bg=INK, fg=MUTED, font=(FONT, 10), wraplength=1000, justify="left",
         ).pack(anchor="w", pady=(0, 8))
         if ordinary_engineers:
@@ -2805,7 +2713,7 @@ class BonnevilleApp(tk.Tk):
                 continue
             free = free_specialties.count(branch)
             tk.Label(
-                page, text=f"{label} specialists: {count} / {free} available / GBP {SPECIALIST_WAGE_GBP:,.0f} each per half-year",
+                page, text=f"{label} specialists: {count} / {free} available / GBP {SPECIALIST_WAGE_GBP:,.0f} each per turn",
                 bg=INK, fg=MUTED, font=(FONT, 10), wraplength=1000,
             ).pack(anchor="w", pady=3)
             if free:
@@ -2834,7 +2742,7 @@ class BonnevilleApp(tk.Tk):
             else:
                 demand = f"demands {sponsor.objective_value:.0%} of the world record every {SPONSOR_OBJECTIVE_DEADLINE_TURNS} turns"
             detail = (
-                f"{sponsor.name}  /  signing GBP {sponsor.signing_bonus_gbp:,.0f}  /  per half-year GBP {sponsor.income_per_turn_gbp:,.0f}  /  "
+                f"{sponsor.name}  /  signing GBP {sponsor.signing_bonus_gbp:,.0f}  /  per turn GBP {sponsor.income_per_turn_gbp:,.0f}  /  "
                 f"reliability +{sponsor.reliability_bonus:.0%}  /  {demand}"
             )
             if available:
@@ -2849,9 +2757,9 @@ class BonnevilleApp(tk.Tk):
         if not messagebox.askyesno(
             "Confirm recruitment",
             f"Hire {label}?\n\nRecruitment: GBP {cost:,.0f}\n"
-            f"Wages: GBP {wage:,.0f} every half-year, including idle phases\n"
-            f"New payroll: GBP {self.campaign.team.payroll_per_turn_gbp + wage:,.0f}/half-year\n"
-            f"Projected next-half-year balance after hiring: GBP {projected:,.0f}",
+            f"Wages: GBP {wage:,.0f} every turn, including idle turns\n"
+            f"New payroll: GBP {self.campaign.team.payroll_per_turn_gbp + wage:,.0f}/turn\n"
+            f"Projected next-turn balance after hiring: GBP {projected:,.0f}",
             parent=self,
         ):
             return
