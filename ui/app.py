@@ -25,10 +25,14 @@ from engines import (
     tune_engine,
 )
 from gearbox import (
-    DIRECT_DRIVE,
     PREBUILT_GEARBOXES,
     TRANSMISSION_CATALOG,
     adjust_gearbox_ratio,
+    available_transmissions,
+    effective_gearbox_reliability,
+    gearbox_overload_fraction,
+    gearbox_power_rating,
+    is_thrust_engine,
     optimize_gearbox_for_engine,
     recommended_transmission,
 )
@@ -116,6 +120,7 @@ from research import (
     TYRE_TECHNOLOGY_TREE,
     TECHNOLOGY_NAME_BY_ID,
     aerodynamics_effects,
+    gearbox_rating_multiplier,
 )
 from simulation import run_simulation
 from sponsors import DEVELOPMENT_OBJECTIVE, SPONSOR_BY_ID, SPONSOR_CATALOG, SPONSOR_OBJECTIVE_DEADLINE_TURNS, available_sponsors
@@ -163,6 +168,22 @@ def closest_rival_gap_headline(rivals, best_speed_mph):
     if gap < 0:
         return f"{-gap:.1f} mph ahead of {rival.name}"
     return f"Level with {rival.name}"
+
+
+def gearbox_load_summary(gearbox, engine, gearbox_research=()):
+    """Describe a gearbox's power rating and any overload reliability penalty."""
+    if is_thrust_engine(engine):
+        return "Thrust engine: no drive load through the gearbox"
+    multiplier = gearbox_rating_multiplier(gearbox_research)
+    rating = gearbox_power_rating(gearbox, multiplier)
+    overload = gearbox_overload_fraction(gearbox, engine, multiplier)
+    if overload <= 0:
+        return f"Rated {rating:,.0f} hp  /  load {engine.power_hp:,.0f} hp  /  reliability {gearbox.reliability:.0%}"
+    reliability = effective_gearbox_reliability(gearbox, engine, multiplier)
+    return (
+        f"OVERLOADED {overload:.0%}: rated {rating:,.0f} hp, engine {engine.power_hp:,.0f} hp"
+        f"  /  reliability {gearbox.reliability:.0%} -> {reliability:.0%}"
+    )
 
 
 class BonnevilleApp(tk.Tk):
@@ -946,6 +967,16 @@ class BonnevilleApp(tk.Tk):
         ).pack(anchor="w", pady=(0, 8))
         if entry.last_incident:
             tk.Label(page, text=entry.last_incident, bg=INK, fg=MUTED, font=(FONT, 10), wraplength=700, justify="left").pack(anchor="w", pady=(0, 8))
+        gearbox_overloaded = gearbox_overload_fraction(
+            vehicle.gearbox, vehicle.engine,
+            gearbox_rating_multiplier(self.campaign.research.gearbox_technology),
+        ) > 0
+        tk.Label(
+            page,
+            text=f"Gearbox: {gearbox_load_summary(vehicle.gearbox, vehicle.engine, self.campaign.research.gearbox_technology)}",
+            bg=INK, fg=ACCENT if gearbox_overloaded else MUTED, font=(FONT, 10),
+            wraplength=700, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
         columns = tk.Frame(page, bg=INK)
         columns.pack(fill="x")
         for label, value in (("Mass", f"{vehicle.mass:,.0f} kg"), ("Drag coefficient", f"{vehicle.cd:.3f}"), ("Frontal area", f"{vehicle.area:.2f} m2"), ("Tyre grip", f"{vehicle.tyre_grip_factor:.2f}")):
@@ -1038,7 +1069,8 @@ class BonnevilleApp(tk.Tk):
         if component == "engine":
             choices = available_engines(self.campaign.research.engine_technology)
         elif component == "gearbox":
-            choices = (DIRECT_DRIVE,) if entry.engine_name in AVAILABLE_ENGINES and AVAILABLE_ENGINES[entry.engine_name].torque_curve_type in ("turbojet", "rocket") else TRANSMISSION_CATALOG
+            fitted_engine = tune_engine(AVAILABLE_ENGINES[entry.engine_name], entry.engine_tune_stage)
+            choices = available_transmissions(fitted_engine, self.campaign.research.gearbox_technology)
         else:
             choices = available_brakes(
                 self.campaign.current_year,
@@ -1064,7 +1096,7 @@ class BonnevilleApp(tk.Tk):
                 stage = self._inherited_engine_tune_stage(choice.name)
                 label = f"{choice.name}  /  {choice.power_hp:,.0f} hp stock  /  GBP {choice.purchase_cost_gbp:,.0f}  /  Saved model tune: {stage}"
             elif component == "gearbox":
-                label = f"{choice.name}  /  {choice.gear_count} gears  /  GBP {choice.cost_gbp:,.0f}"
+                label = f"{choice.name}  /  {choice.gear_count} gears  /  GBP {choice.cost_gbp:,.0f}\n{gearbox_load_summary(choice, fitted_engine, self.campaign.research.gearbox_technology)}"
             else:
                 label = f"{choice.name}  /  {choice.max_braking_g:.2f} g  /  GBP {choice.cost_gbp:,.0f}"
             self.action_button(container, label, lambda selected=choice: self.apply_component(entry, component, selected, window, reuse_engine_tune=reuse_tune.get()))
@@ -1080,7 +1112,11 @@ class BonnevilleApp(tk.Tk):
             inherited_stage = self._inherited_engine_tune_stage(choice.name) if reuse_engine_tune else 0
             entry.engine_name = choice.name
             entry.engine_tune_stage = inherited_stage
-            default_box = recommended_transmission(choice)
+            default_box = recommended_transmission(
+                tune_engine(choice, inherited_stage),
+                self.campaign.research.gearbox_technology,
+                gearbox_rating_multiplier(self.campaign.research.gearbox_technology),
+            )
             if default_box.name == entry.gearbox_name:
                 gearbox = deepcopy(default_box)
                 if entry.gearbox_ratios:
@@ -1338,8 +1374,8 @@ class BonnevilleApp(tk.Tk):
                 stage_label = f"  /  Saved model tune: {inherited_stage}"
                 self.action_button(page, f"{item.name}  /  {item.power_hp:,.0f} hp stock  /  GBP {item.purchase_cost_gbp:,.0f}  /  Reliability {item.reliability:.0%}{stage_label}", lambda value=item: self.builder_select("engine", value, reuse_engine_tune=reuse_tune.get()))
         elif step == "gearbox":
-            engine = self.builder["engine"]
-            choices = (DIRECT_DRIVE,) if engine.torque_curve_type in ("turbojet", "rocket") else TRANSMISSION_CATALOG
+            engine = tune_engine(self.builder["engine"], self.builder.get("engine_tune_stage", 0))
+            choices = available_transmissions(engine, self.campaign.research.gearbox_technology)
             for item in choices:
                 inherited, has_saved_ratios = self._gearbox_with_saved_ratios(item)
                 ratio_label = (
@@ -1347,7 +1383,8 @@ class BonnevilleApp(tk.Tk):
                     if has_saved_ratios
                     else ""
                 )
-                self.action_button(page, f"{item.name}  /  {item.gear_count} gears  /  {item.efficiency:.0%} efficiency  /  GBP {item.cost_gbp:,.0f}{ratio_label}", lambda value=item: self.builder_select("gearbox", value))
+                load_label = gearbox_load_summary(item, engine, self.campaign.research.gearbox_technology)
+                self.action_button(page, f"{item.name}  /  {item.gear_count} gears  /  {item.efficiency:.0%} efficiency  /  GBP {item.cost_gbp:,.0f}{ratio_label}\n{load_label}", lambda value=item: self.builder_select("gearbox", value))
         elif step == "brakes":
             for item in available_brakes(
                 self.campaign.current_year,
@@ -1489,7 +1526,8 @@ class BonnevilleApp(tk.Tk):
             "Paid now; available when construction completes.\n\n"
             f"Engine tune: {engine_tune_summary}\n"
             f"{gearbox.name} ratios: {ratio_summary}\n"
-            f"Final drive: {gearbox.final_drive_ratio:.2f}\n\n"
+            f"Final drive: {gearbox.final_drive_ratio:.2f}\n"
+            f"Gearbox: {gearbox_load_summary(gearbox, engine, self.campaign.research.gearbox_technology)}\n\n"
             f"Pre-fitted aerodynamics:\n{aero_summary}\n\n"
             f"Available funds: GBP {self.campaign.team.cash:,.0f}",
             parent=self,
@@ -1869,6 +1907,9 @@ class BonnevilleApp(tk.Tk):
                 self.campaign
             ) * condition_failure_multiplier(entry.wear, entry.damage),
             wheel_lock_event_count=getattr(result, "wheel_lock_event_count", 0),
+            gearbox_rating_multiplier=gearbox_rating_multiplier(
+                self.campaign.research.gearbox_technology
+            ),
         )
         condition_note = apply_vehicle_run_condition(self.campaign, entry, result.peak_speed_mph, outcome)
         if outcome.failed and entry.damage >= 60 and outcome.repaired:
@@ -2919,7 +2960,8 @@ class BonnevilleApp(tk.Tk):
             tk.Label(page, text=f"{engine.name}  /  {engine.era}  /  {engine.power_hp:,.0f} hp  /  {engine.torque_nm:,.0f} Nm", bg=INK, fg=PAPER, font=(FONT, 10)).pack(anchor="w", pady=3)
         self.section(page, "Transmissions & brakes")
         for gearbox in PREBUILT_GEARBOXES + TRANSMISSION_CATALOG:
-            tk.Label(page, text=f"{gearbox.name}  /  {gearbox.gear_count} gear(s)  /  {gearbox.efficiency:.0%} efficiency", bg=INK, fg=PAPER, font=(FONT, 10)).pack(anchor="w", pady=3)
+            rating = "unrated" if gearbox.max_power_hp == float("inf") else f"rated {gearbox.max_power_hp:,.0f} hp"
+            tk.Label(page, text=f"{gearbox.name}  /  {gearbox.gear_count} gear(s)  /  {gearbox.efficiency:.0%} efficiency  /  {rating}", bg=INK, fg=PAPER, font=(FONT, 10)).pack(anchor="w", pady=3)
         for brakes in BRAKE_CATALOG:
             tk.Label(page, text=f"{brakes.name}  /  {brakes.max_braking_g:.2f} g  /  {brakes.efficiency:.0%} efficiency", bg=INK, fg=PAPER, font=(FONT, 10)).pack(anchor="w", pady=3)
         self.section(page, "Tracks")

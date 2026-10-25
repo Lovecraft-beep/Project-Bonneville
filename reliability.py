@@ -3,6 +3,7 @@
 import random
 from dataclasses import dataclass
 from condition import assess_incident_damage
+from gearbox import effective_gearbox_reliability
 
 MIN_SPEED_FACTOR = 0.25
 REFERENCE_SPEED_MPH = 250.0
@@ -88,8 +89,13 @@ def resolve_run_failure(
     sponsor_reliability_bonus=0.0,
     failure_risk_multiplier=1.0,
     wheel_lock_event_count=0,
+    gearbox_rating_multiplier=1.0,
 ):
-    """Resolve a named failure and whether the team can repair it trackside."""
+    """Resolve a named failure and whether the team can repair it trackside.
+
+    Engine power above the gearbox's rating (scaled by researched gearbox
+    improvements) reduces gearbox reliability and raises gear-failure risk.
+    """
     engine_failure_probability = calculate_failure_probability(
         engine,
         peak_speed_mph,
@@ -104,7 +110,14 @@ def resolve_run_failure(
         (
             GEAR_FAILURE,
             (
-                (1.0 - gearbox.reliability) * speed_factor * team_skill_modifier
+                (
+                    1.0
+                    - effective_gearbox_reliability(
+                        gearbox, engine, gearbox_rating_multiplier
+                    )
+                )
+                * speed_factor
+                * team_skill_modifier
                 if gearbox is not None
                 else 0.0
             ),

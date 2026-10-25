@@ -21,6 +21,7 @@ class TechnologyNode:
     cooling_penalty: float = 0.0
     reputation_bonus: float = 0.0
     turns_required: int = 3
+    gearbox_rating_bonus: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -584,6 +585,58 @@ ENGINE_TECHNOLOGY_TREE = ENGINE_TECHNOLOGY_TREE + (
 )
 GEARBOX_TECHNOLOGY_TREE = (
     TechnologyNode(
+        "three_speed_sliding_mesh_gearbox",
+        "3-Speed Sliding-Mesh Gearbox",
+        "Pioneers",
+        ("heavy_duty_racing_ladder",),
+        _tier_cost_gbp(0, 2),
+        1,
+        "Unlocks the 3-Speed Transmission, rated for engines up to 450 hp.",
+        turns_required=3,
+    ),
+    TechnologyNode(
+        "case_hardened_gears",
+        "Case-Hardened Gears",
+        "The Interwar Years",
+        ("three_speed_sliding_mesh_gearbox", "braced_box_section_frame"),
+        _tier_cost_gbp(1, 0),
+        _tier_engineers_required(1, 0),
+        "Carburised gear teeth resist pitting and breakage: every gearbox's power rating rises 25%.",
+        turns_required=_tier_turns_required(1, 0),
+        gearbox_rating_bonus=0.25,
+    ),
+    TechnologyNode(
+        "four_speed_racing_gearbox",
+        "4-Speed Racing Gearbox",
+        "The Interwar Years",
+        ("three_speed_sliding_mesh_gearbox", "twin_rail_streamliner_frame"),
+        _tier_cost_gbp(1, 2),
+        _tier_engineers_required(1, 2),
+        "Unlocks the 4-Speed Transmission, rated for aero-engine conversions up to 1,200 hp.",
+        turns_required=_tier_turns_required(1, 2),
+    ),
+    TechnologyNode(
+        "five_speed_close_ratio_gearbox",
+        "5-Speed Close-Ratio Gearbox",
+        "The Interwar Years",
+        ("four_speed_racing_gearbox", "full_envelope_streamliner_chassis"),
+        _tier_cost_gbp(1, 4),
+        _tier_engineers_required(1, 4),
+        "Unlocks the 5-Speed Transmission, rated for supercharged aero engines up to 3,000 hp.",
+        turns_required=_tier_turns_required(1, 4),
+    ),
+    TechnologyNode(
+        "alloy_steel_gear_sets",
+        "Alloy Steel Gear Sets",
+        "The Jet Age",
+        ("case_hardened_gears", "riveted_aluminium_monocoque"),
+        _tier_cost_gbp(2, 0),
+        _tier_engineers_required(2, 0),
+        "Nickel-chrome alloy gears carry more load: every gearbox's power rating rises a further 25%.",
+        turns_required=_tier_turns_required(2, 0),
+        gearbox_rating_bonus=0.25,
+    ),
+    TechnologyNode(
         "computer_optimised_gear_ratios",
         "Computer-Optimised Gear Ratios",
         "The Professional Era",
@@ -762,4 +815,14 @@ def available_tyre_technologies(tyre_researched, chassis_researched):
 def available_brake_technologies(brake_researched, chassis_researched):
     return available_branch_technologies(
         BRAKE_TECHNOLOGY_TREE, brake_researched, chassis_researched
+    )
+
+
+def gearbox_rating_multiplier(gearbox_researched):
+    """Return the cumulative gearbox power-rating multiplier from research."""
+    researched_ids = set(gearbox_researched)
+    return 1.0 + sum(
+        node.gearbox_rating_bonus
+        for node in GEARBOX_TECHNOLOGY_TREE
+        if node.technology_id in researched_ids
     )

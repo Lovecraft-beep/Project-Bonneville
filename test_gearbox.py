@@ -1,11 +1,142 @@
 import unittest
 from math import pi
+from types import SimpleNamespace
 
 from cars import create_blue_bird_1927, create_darracq_1905
-from engines import NAPIER_LION, ROLLS_ROYCE_R
-from gearbox import GOLDEN_ARROW_3_SPEED, Gearbox, adjust_gearbox_ratio
+from engines import (
+    J47_TURBOJET,
+    LIBERTY_V12,
+    NAPIER_LION,
+    PIONEER_SINGLE_CYLINDER,
+    ROLLS_ROYCE_R,
+)
+from gearbox import (
+    DIRECT_DRIVE,
+    FIVE_SPEED_TRANSMISSION,
+    FOUR_SPEED_TRANSMISSION,
+    GOLDEN_ARROW_3_SPEED,
+    THREE_SPEED_TRANSMISSION,
+    TWO_SPEED_TRANSMISSION,
+    Gearbox,
+    adjust_gearbox_ratio,
+    available_transmissions,
+    effective_gearbox_reliability,
+    gearbox_overload_fraction,
+    recommended_transmission,
+)
+from reliability import GEAR_FAILURE, resolve_run_failure
+from research import (
+    CHASSIS_TECHNOLOGY_BY_ID,
+    GEARBOX_TECHNOLOGY_BY_ID,
+    GEARBOX_TECHNOLOGY_TREE,
+    gearbox_rating_multiplier,
+)
 from simulation import run_simulation
 from tracks import BONNEVILLE_SALT_FLATS, DAYTONA_BEACH
+
+
+class GearboxDevelopmentTests(unittest.TestCase):
+    def test_only_two_speed_is_available_before_gearbox_research(self):
+        self.assertEqual(
+            available_transmissions(PIONEER_SINGLE_CYLINDER, ()),
+            (TWO_SPEED_TRANSMISSION,),
+        )
+
+    def test_researched_gearboxes_become_available(self):
+        choices = available_transmissions(
+            NAPIER_LION,
+            ("three_speed_sliding_mesh_gearbox", "four_speed_racing_gearbox"),
+        )
+        self.assertEqual(
+            choices,
+            (TWO_SPEED_TRANSMISSION, THREE_SPEED_TRANSMISSION, FOUR_SPEED_TRANSMISSION),
+        )
+
+    def test_thrust_engines_only_use_direct_drive(self):
+        self.assertEqual(available_transmissions(J47_TURBOJET, ()), (DIRECT_DRIVE,))
+
+    def test_gearbox_technology_prerequisites_exist(self):
+        known = set(CHASSIS_TECHNOLOGY_BY_ID) | set(GEARBOX_TECHNOLOGY_BY_ID)
+        for node in GEARBOX_TECHNOLOGY_TREE:
+            self.assertTrue(set(node.prerequisites) <= known, node.technology_id)
+        for gearbox in (THREE_SPEED_TRANSMISSION, FOUR_SPEED_TRANSMISSION, FIVE_SPEED_TRANSMISSION):
+            self.assertIn(gearbox.required_technology, GEARBOX_TECHNOLOGY_BY_ID)
+
+    def test_rating_improvements_stack(self):
+        self.assertEqual(gearbox_rating_multiplier(()), 1.0)
+        self.assertEqual(
+            gearbox_rating_multiplier(("case_hardened_gears", "alloy_steel_gear_sets")),
+            1.5,
+        )
+
+    def test_recommended_transmission_respects_research_and_rating(self):
+        self.assertEqual(
+            recommended_transmission(LIBERTY_V12, ("three_speed_sliding_mesh_gearbox",)),
+            THREE_SPEED_TRANSMISSION,
+        )
+        self.assertEqual(recommended_transmission(LIBERTY_V12, ()), TWO_SPEED_TRANSMISSION)
+        self.assertEqual(recommended_transmission(ROLLS_ROYCE_R), FIVE_SPEED_TRANSMISSION)
+
+
+class GearboxOverloadTests(unittest.TestCase):
+    def test_engine_within_rating_has_no_penalty(self):
+        self.assertEqual(
+            effective_gearbox_reliability(TWO_SPEED_TRANSMISSION, PIONEER_SINGLE_CYLINDER),
+            TWO_SPEED_TRANSMISSION.reliability,
+        )
+
+    def test_overload_reduces_reliability(self):
+        engine = SimpleNamespace(power_hp=150.0, torque_curve_type="early_piston")
+        self.assertAlmostEqual(
+            gearbox_overload_fraction(TWO_SPEED_TRANSMISSION, engine), 0.25
+        )
+        self.assertAlmostEqual(
+            effective_gearbox_reliability(TWO_SPEED_TRANSMISSION, engine),
+            TWO_SPEED_TRANSMISSION.reliability - 0.125,
+        )
+
+    def test_extreme_overload_is_floored(self):
+        self.assertEqual(
+            effective_gearbox_reliability(TWO_SPEED_TRANSMISSION, ROLLS_ROYCE_R), 0.05
+        )
+
+    def test_rating_multiplier_removes_overload(self):
+        engine = SimpleNamespace(power_hp=150.0, torque_curve_type="early_piston")
+        self.assertEqual(
+            gearbox_overload_fraction(TWO_SPEED_TRANSMISSION, engine, 1.25), 0.0
+        )
+
+    def test_thrust_engines_never_overload_gearbox(self):
+        self.assertEqual(gearbox_overload_fraction(DIRECT_DRIVE, J47_TURBOJET), 0.0)
+
+    def test_overload_raises_gear_failure_probability(self):
+        team = SimpleNamespace(engineers=1, mechanics=2)
+        perfect_engine = SimpleNamespace(
+            reliability=1.0, power_hp=100.0, torque_curve_type="early_piston"
+        )
+        overloaded_engine = SimpleNamespace(
+            reliability=1.0, power_hp=240.0, torque_curve_type="early_piston"
+        )
+        within = resolve_run_failure(
+            perfect_engine, 100.0, team, random_value=0.99, gearbox=TWO_SPEED_TRANSMISSION
+        )
+        overloaded = resolve_run_failure(
+            overloaded_engine, 100.0, team, random_value=0.99, gearbox=TWO_SPEED_TRANSMISSION
+        )
+        improved = resolve_run_failure(
+            overloaded_engine, 100.0, team, random_value=0.99,
+            gearbox=TWO_SPEED_TRANSMISSION, gearbox_rating_multiplier=2.0,
+        )
+        self.assertGreater(overloaded.failure_probability, within.failure_probability)
+        self.assertAlmostEqual(improved.failure_probability, within.failure_probability)
+
+    def test_overloaded_gearbox_failure_is_gear_failure(self):
+        engine = SimpleNamespace(reliability=1.0, power_hp=2_000.0, torque_curve_type="early_piston")
+        team = SimpleNamespace(engineers=0, mechanics=0)
+        outcome = resolve_run_failure(
+            engine, 250.0, team, random_value=0.5, gearbox=TWO_SPEED_TRANSMISSION
+        )
+        self.assertEqual(outcome.failure_type, GEAR_FAILURE)
 
 
 class GearboxShiftTests(unittest.TestCase):

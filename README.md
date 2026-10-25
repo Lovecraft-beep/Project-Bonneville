@@ -250,9 +250,30 @@ and unassigned engineers before it can start.
 
 Later engine and component research depends on earlier branch technologies and
 specific chassis tiers. For example, Edwardian Giants requires both Pioneer
-Engines and Advanced Edwardian Racing Frame. Gearbox research currently has only
-one project, Computer-Optimised Gear Ratios, which requires Computer-Optimised
-Spaceframe and is therefore unavailable in the opening campaign.
+Engines and Advanced Edwardian Racing Frame.
+
+### Gearbox development
+
+Only the 2-Speed Transmission (and Direct Drive for turbojet and rocket cars)
+is available at the start. Better gearboxes must be researched, and each
+carries a maximum engine power rating:
+
+| Transmission | Rating | Research |
+| --- | --- | --- |
+| 2-Speed | 120 hp | Available at start |
+| 3-Speed | 450 hp | 3-Speed Sliding-Mesh Gearbox (Pioneers, needs Heavy-Duty Racing Ladder) |
+| 4-Speed | 1,200 hp | 4-Speed Racing Gearbox (Interwar, needs Twin-Rail Streamliner Frame) |
+| 5-Speed | 3,000 hp | 5-Speed Close-Ratio Gearbox (Interwar, needs Full-Envelope Streamliner Chassis) |
+
+Case-Hardened Gears (Interwar) and Alloy Steel Gear Sets (Jet Age) each raise
+every gearbox's rating by 25%. A piston engine whose power, including any
+tune, exceeds the gearbox rating costs gearbox reliability: 0.5 reliability
+per 100% overload (5% per 10% over), down to a 5% floor. Lower reliability
+raises the chance of a gear failure, which ends the run. Thrust engines do not
+drive through the gearbox and are never penalised. The designer, the component
+swap list, and the vehicle page all show each gearbox's rating, its load, and
+any overload. Computer-Optimised Gear Ratios still requires
+Computer-Optimised Spaceframe.
 
 ## Running the Prototype
 

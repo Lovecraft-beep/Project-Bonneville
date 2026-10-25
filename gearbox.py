@@ -5,6 +5,10 @@ from math import pi
 
 HORSEPOWER_IN_WATTS = 745.7
 METRES_PER_MILE = 1609.344
+THRUST_ENGINE_TYPES = ("turbojet", "rocket")
+# Reliability lost per 100% of engine power above the gearbox's rating.
+GEARBOX_OVERLOAD_RELIABILITY_PENALTY = 0.5
+MIN_OVERLOADED_GEARBOX_RELIABILITY = 0.05
 
 
 @dataclass
@@ -21,6 +25,8 @@ class Gearbox:
     shift_up_rpm: int = 3_100
     shift_down_rpm: int = 1_200
     clutch_slip_factor: float = 0.15
+    max_power_hp: float = float("inf")
+    required_technology: str | None = None
     current_gear: int = 1
     shift_elapsed: float = 0.0
     pending_gear: int | None = None
@@ -40,6 +46,8 @@ class Gearbox:
             raise ValueError("shift_down_rpm must be below shift_up_rpm")
         if not 0 <= self.clutch_slip_factor < 1:
             raise ValueError("shift timings and clutch slip must be valid")
+        if self.max_power_hp <= 0:
+            raise ValueError("gearbox power rating must be positive")
 
     @property
     def gear_count(self):
@@ -191,6 +199,7 @@ BLUE_BIRD_GEARBOX = Gearbox(
     shift_up_rpm=2_600,
     shift_down_rpm=1_200,
     cost_gbp=4_000.0,
+    max_power_hp=1_000.0,
 )
 
 
@@ -201,6 +210,7 @@ BRICK_3_SPEED = Gearbox(
     shift_up_rpm=2_600,
     shift_down_rpm=1_200,
     cost_gbp=4_500.0,
+    max_power_hp=1_000.0,
 )
 
 
@@ -211,6 +221,7 @@ JEANTAUD_3_SPEED = Gearbox(
     shift_up_rpm=2_300,
     shift_down_rpm=1_100,
     cost_gbp=2_500.0,
+    max_power_hp=100.0,
 )
 
 
@@ -226,6 +237,7 @@ RAILTON_3_SPEED_LSR = Gearbox(
     cost_gbp=12_000.0,
     shift_up_rpm=3_200,
     shift_down_rpm=1_400,
+    max_power_hp=2_600.0,
 )
 
 
@@ -241,6 +253,7 @@ GOLDEN_ARROW_3_SPEED = Gearbox(
     cost_gbp=15_000.0,
     shift_up_rpm=3_300,
     shift_down_rpm=1_500,
+    max_power_hp=1_000.0,
 )
 
 
@@ -256,6 +269,7 @@ STANLEY_ROCKET_DIRECT_DRIVE = Gearbox(
     cost_gbp=3_000.0,
     shift_up_rpm=1_400,
     shift_down_rpm=700,
+    max_power_hp=200.0,
 )
 
 
@@ -271,6 +285,7 @@ DARRACQ_2_SPEED = Gearbox(
     cost_gbp=5_000.0,
     shift_up_rpm=1_800,
     shift_down_rpm=900,
+    max_power_hp=250.0,
 )
 
 
@@ -317,6 +332,7 @@ TWO_SPEED_TRANSMISSION = Gearbox(
     cost_gbp=4_000.0,
     shift_up_rpm=2_200,
     shift_down_rpm=900,
+    max_power_hp=120.0,
 )
 
 
@@ -332,6 +348,8 @@ THREE_SPEED_TRANSMISSION = Gearbox(
     cost_gbp=9_000.0,
     shift_up_rpm=2_800,
     shift_down_rpm=1_200,
+    max_power_hp=450.0,
+    required_technology="three_speed_sliding_mesh_gearbox",
 )
 
 
@@ -347,6 +365,8 @@ FOUR_SPEED_TRANSMISSION = Gearbox(
     cost_gbp=16_000.0,
     shift_up_rpm=3_000,
     shift_down_rpm=1_400,
+    max_power_hp=1_200.0,
+    required_technology="four_speed_racing_gearbox",
 )
 
 
@@ -362,16 +382,18 @@ FIVE_SPEED_TRANSMISSION = Gearbox(
     cost_gbp=26_000.0,
     shift_up_rpm=3_200,
     shift_down_rpm=1_500,
+    max_power_hp=3_000.0,
+    required_technology="five_speed_close_ratio_gearbox",
 )
 
 
-# Power brackets (engine power_hp) that select a sensible default tier for
-# piston engines. Thrust engines (turbojet/rocket) always use Direct Drive.
-PISTON_TRANSMISSION_TIERS = (
-    (100.0, TWO_SPEED_TRANSMISSION),
-    (1_000.0, THREE_SPEED_TRANSMISSION),
-    (3_000.0, FOUR_SPEED_TRANSMISSION),
-    (float("inf"), FIVE_SPEED_TRANSMISSION),
+# Piston-engine transmissions in development order. Each must be researched
+# (except the starting 2-speed) and carries a maximum engine power rating.
+PISTON_TRANSMISSIONS = (
+    TWO_SPEED_TRANSMISSION,
+    THREE_SPEED_TRANSMISSION,
+    FOUR_SPEED_TRANSMISSION,
+    FIVE_SPEED_TRANSMISSION,
 )
 
 TRANSMISSION_CATALOG = (
@@ -388,14 +410,76 @@ AVAILABLE_GEARBOXES = {
 }
 
 
-def recommended_transmission(engine):
-    """Return the transmission tier suited to an engine's propulsion type."""
-    if engine.torque_curve_type in ("turbojet", "rocket"):
+def is_thrust_engine(engine):
+    return getattr(engine, "torque_curve_type", None) in THRUST_ENGINE_TYPES
+
+
+def is_gearbox_unlocked(gearbox, researched_technologies):
+    """Return whether a gearbox's required technology has been researched."""
+    return (
+        gearbox.required_technology is None
+        or gearbox.required_technology in researched_technologies
+    )
+
+
+def available_transmissions(engine, researched_technologies):
+    """Return the researched transmissions that can be fitted to an engine."""
+    if is_thrust_engine(engine):
+        return (DIRECT_DRIVE,)
+    return tuple(
+        gearbox
+        for gearbox in PISTON_TRANSMISSIONS
+        if is_gearbox_unlocked(gearbox, researched_technologies)
+    )
+
+
+def gearbox_power_rating(gearbox, rating_multiplier=1.0):
+    """Return the gearbox's maximum engine power after research improvements."""
+    return getattr(gearbox, "max_power_hp", float("inf")) * rating_multiplier
+
+
+def gearbox_overload_fraction(gearbox, engine, rating_multiplier=1.0):
+    """Return how far engine power exceeds the gearbox rating (0.2 = 20% over).
+
+    Thrust engines do not drive through the gearbox, so they never overload it.
+    """
+    if gearbox is None or engine is None or is_thrust_engine(engine):
+        return 0.0
+    rating = gearbox_power_rating(gearbox, rating_multiplier)
+    power_hp = getattr(engine, "power_hp", 0.0)
+    if rating == float("inf") or power_hp <= rating:
+        return 0.0
+    return power_hp / rating - 1.0
+
+
+def effective_gearbox_reliability(gearbox, engine, rating_multiplier=1.0):
+    """Return gearbox reliability after any penalty for exceeding its rating."""
+    overload = gearbox_overload_fraction(gearbox, engine, rating_multiplier)
+    if overload <= 0:
+        return gearbox.reliability
+    return max(
+        min(MIN_OVERLOADED_GEARBOX_RELIABILITY, gearbox.reliability),
+        gearbox.reliability - overload * GEARBOX_OVERLOAD_RELIABILITY_PENALTY,
+    )
+
+
+def recommended_transmission(engine, researched_technologies=None, rating_multiplier=1.0):
+    """Return the lightest unlocked transmission rated for the engine.
+
+    With no research list every transmission is considered. If no unlocked
+    transmission is rated for the engine, the highest-rated one is returned.
+    """
+    if is_thrust_engine(engine):
         return DIRECT_DRIVE
-    for power_ceiling, transmission in PISTON_TRANSMISSION_TIERS:
-        if engine.power_hp <= power_ceiling:
+    choices = (
+        PISTON_TRANSMISSIONS
+        if researched_technologies is None
+        else available_transmissions(engine, researched_technologies)
+    )
+    for transmission in choices:
+        if engine.power_hp <= gearbox_power_rating(transmission, rating_multiplier):
             return transmission
-    return FIVE_SPEED_TRANSMISSION
+    return choices[-1]
 
 
 def adjust_gearbox_ratio(gearbox, gear_index, change):
