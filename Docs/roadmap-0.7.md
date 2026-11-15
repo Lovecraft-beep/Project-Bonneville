@@ -60,7 +60,7 @@ Result:
 
 ## 0.7b - Application Boundary
 
-**Status: In progress**
+*Status: Closed - Complete*
 
 Objective: establish a small, tested application-facing interface between the core game engine and user-interface implementations.
 
@@ -107,13 +107,26 @@ Development branch:
 
 - [x] A client can operate the basic campaign lifecycle without knowing about Tkinter.
 - [x] UI-independent operations have a stable application-facing interface.
-- [ ] Existing Tkinter gameplay remains functional.
+- [x] Verify the legacy Tkinter client remains runnable after the application-boundary refactor.
+- [x] Confirm no functional regression attributable to CampaignApplication.
+- [x] Record macOS Aqua presentation limitations as legacy-UI debt.
+- [x] Make the End Turn control natively readable on macOS.
 - [x] Full regression suite passes.
 - [x] Headless regression test passes.
 - [x] Application-interface tests pass.
 - [x] Application-boundary implementation committed and pushed to `develop/0.7b`.
-- [ ] Documentation update committed and pushed to `develop/0.7b`.
+- [x] Legacy Tkinter client remains runnable.
+- [x] Full regression suite passes: 199 tests.
+- [x] Changes committed and pushed to develop/0.7b.
 
+---
+### Legacy desktop UI decision
+
+The Tkinter client remains available as a legacy desktop interface.
+
+Testing on macOS Aqua identified presentation inconsistencies in classic Tk controls. Core controls remain functional, and the End Turn control was converted to a native-themed ttk button as a limited compatibility improvement.
+
+Further large-scale Tkinter restyling is explicitly deferred. Project Bonneville 0.7 will invest in the browser/HTML presentation layer rather than undertake a cross-platform redesign of the legacy Tkinter interface.
 ---
 
 ## 0.7c - First Web Adapter
