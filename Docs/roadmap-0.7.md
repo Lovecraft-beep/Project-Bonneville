@@ -33,7 +33,7 @@ Objective: establish Grand-Slam as a safe development environment and prove that
 - [x] Create a pre-normalisation safety branch.
 - [x] Add `.gitattributes`.
 - [x] Standardise Python, Markdown and JSON files on LF.
-- [x] Ignore generated test output.
+- [x] Ignore generated test output and macOS metadata.
 - [x] Commit and push the clean baseline.
 
 Baseline commit:
@@ -75,30 +75,44 @@ Development branch:
 - [x] Verify create, save, load and advance-turn operations.
 - [x] Verify the isolated engine process does not import Tkinter or `ui.app`.
 - [x] Run the complete regression suite.
-- [x] Confirm all 192 tests pass.
+- [x] Confirm the regression suite passes.
 
 ### Application interface
 
-- [ ] Define the minimum application-level campaign operations.
-- [ ] Introduce an application/service layer without moving game rules out of the engine.
-- [ ] Provide create/new campaign operation.
-- [ ] Provide load campaign operation.
-- [ ] Provide save campaign operation.
-- [ ] Provide advance-turn operation.
-- [ ] Provide a serialisable/readable campaign summary suitable for non-Tkinter clients.
-- [ ] Add focused tests for the application interface.
-- [ ] Maintain compatibility with the existing Tkinter application.
-- [ ] Run the complete regression suite after the refactor.
-- [ ] Document the application boundary.
+- [x] Define the minimum application-level campaign operations.
+- [x] Introduce `CampaignApplication` without moving game rules out of the engine.
+- [x] Provide create/new campaign operation.
+- [x] Provide load campaign operation.
+- [x] Provide save campaign operation.
+- [x] Provide advance-turn operation.
+- [x] Automatically persist campaign state after application-level turn advancement.
+- [x] Preserve the return value from `management.advance_turn()`.
+- [x] Provide a JSON-serialisable campaign summary suitable for non-Tkinter clients.
+- [x] Reuse existing world-record resolution rather than duplicating game rules.
+- [x] Add focused tests for the application interface.
+- [x] Run the complete regression suite after introducing the application boundary.
+- [x] Document the application boundary.
+- [ ] Verify compatibility with the existing Tkinter desktop application.
+
+### Current verification
+
+- [x] `CampaignApplication` operates without importing Tkinter or `ui.app`.
+- [x] Application summaries successfully serialise to JSON.
+- [x] Turn advancement through `CampaignApplication` automatically persists campaign state.
+- [x] Application-specific test suite passes: 7 tests.
+- [x] Complete Project Bonneville regression suite passes: 199 tests.
+- [x] Application boundary committed and pushed to `develop/0.7b` at `f69765f`.
 
 ### 0.7b exit criteria
 
-- [ ] A client can operate the basic campaign lifecycle without knowing about Tkinter.
-- [ ] UI-independent operations have a stable application-facing interface.
+- [x] A client can operate the basic campaign lifecycle without knowing about Tkinter.
+- [x] UI-independent operations have a stable application-facing interface.
 - [ ] Existing Tkinter gameplay remains functional.
-- [ ] Full regression suite passes.
-- [ ] Headless regression test passes.
-- [ ] Changes committed and pushed to `develop/0.7b`.
+- [x] Full regression suite passes.
+- [x] Headless regression test passes.
+- [x] Application-interface tests pass.
+- [x] Application-boundary implementation committed and pushed to `develop/0.7b`.
+- [ ] Documentation update committed and pushed to `develop/0.7b`.
 
 ---
 
@@ -117,13 +131,21 @@ Objective: prove that the application layer can be driven over HTTP without coup
 - [ ] Add a read-only campaign-status endpoint or page.
 - [ ] Add new/load campaign capability.
 - [ ] Add an advance-turn action.
-- [ ] Persist campaign state through the application layer.
+- [ ] Persist campaign state through `CampaignApplication`.
 - [ ] Add automated tests for web-to-application interaction.
+
+### Architecture
+
+- [ ] Web code depends on `CampaignApplication`, not directly on presentation-specific Tkinter behaviour.
+- [ ] HTTP-specific behaviour remains outside the core game engine.
+- [ ] No web-framework dependency is introduced into `management.py` or other core engine modules.
+- [ ] Headless engine and application regressions remain green.
 
 ### 0.7c exit criteria
 
 - [ ] Bonneville can be started locally as a web application.
 - [ ] A browser can display campaign status.
+- [ ] A browser interaction can create/load a campaign.
 - [ ] A browser interaction can advance a campaign turn.
 - [ ] State survives application restart.
 - [ ] Tkinter remains independent and functional.
@@ -143,17 +165,18 @@ Objective: provide enough browser UI to exercise the early campaign loop without
 - [ ] Display campaign date, season and turn.
 - [ ] Display team finances and staffing.
 - [ ] Display current world record and rival information.
-- [ ] Display world headlines/reactions.
+- [ ] Display world headlines and reactions.
 - [ ] Display active engineering work.
 - [ ] Provide an End Turn control.
-- [ ] Present completed-project/world-event feedback after advancing.
+- [ ] Present completed-project and world-event feedback after advancing.
 - [ ] Ensure URLs and static assets work beneath a configurable path prefix.
 
 ### Architecture
 
 - [ ] Keep presentation logic out of `management.py`.
 - [ ] Keep HTTP-specific behaviour out of the core engine.
-- [ ] Ensure the application can operate beneath `/bonneville/`.
+- [ ] Use the application boundary for campaign lifecycle operations.
+- [ ] Ensure the web application can operate beneath `/bonneville/`.
 - [ ] Introduce no dependency on OctoPi-specific infrastructure into the core game.
 
 ### 0.7d exit criteria
@@ -162,6 +185,7 @@ Objective: provide enough browser UI to exercise the early campaign loop without
 - [ ] Campaign state remains persistent.
 - [ ] Browser and desktop interfaces use the same underlying game rules.
 - [ ] Automated tests cover the browser-facing campaign lifecycle.
+- [ ] Existing headless and application tests remain green.
 
 ---
 
@@ -169,7 +193,7 @@ Objective: provide enough browser UI to exercise the early campaign loop without
 
 **Status: Planned**
 
-Objective: deploy the browser prototype onto the OctoPi cluster without making the cluster or home network dependent on Bonneville.
+Objective: deploy the browser prototype onto the OctoPi cluster without making the cluster or home network depend on Bonneville.
 
 Target application host:
 
@@ -211,6 +235,7 @@ Intended public cluster path:
 - [ ] Campaign create/load/save/advance works through the deployed application.
 - [ ] Rebooting `octopi03` restores the service.
 - [ ] Existing cluster services remain healthy.
+- [ ] The home network has no dependency on Bonneville.
 
 ---
 
@@ -273,6 +298,7 @@ Before declaring Project Bonneville 0.7 complete:
 2. **Refactor incrementally.** Each architectural change must leave the test suite green.
 3. **Keep Tkinter working.** The browser interface is initially an additional client, not a destructive rewrite.
 4. **Test the boundary.** Headless operation must remain an explicit regression guarantee.
-5. **Automate the cluster.** Stateful OctoPi configuration belongs in Ansible and Git wherever practical.
-6. **Do not make the home network depend on Bonneville.** Bonneville is an application workload, not critical infrastructure.
-7. **Checkpoint frequently.** Each meaningful milestone should end in a clean, tested Git state.
+5. **Use the application boundary.** New presentation layers should consume `CampaignApplication` rather than duplicate campaign lifecycle logic.
+6. **Automate the cluster.** Stateful OctoPi configuration belongs in Ansible and Git wherever practical.
+7. **Do not make the home network depend on Bonneville.** Bonneville is an application workload, not critical infrastructure.
+8. **Checkpoint frequently.** Each meaningful milestone should end in a clean, tested Git state.
