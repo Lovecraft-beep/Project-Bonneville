@@ -1,0 +1,7 @@
+# Project Bonneville line-ending policy
+* text=auto
+
+# Source and documentation use LF consistently across platforms
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf

@@ -5,3 +5,6 @@ __pycache__/
 campaign_state.json
 historical_records.json
 test_vehicle_diagnostics.log
+
+# Generated test output
+full_test_output.txt
