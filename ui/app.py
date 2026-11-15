@@ -407,24 +407,11 @@ class BonnevilleApp(tk.Tk):
         ).pack(anchor="w", pady=(18, 8))
 
     def action_button(self, parent, text, command, primary=False, width=None):
-        button = tk.Button(
+        button = ttk.Button(
             parent,
             text=text,
             command=command,
             width=width,
-            anchor="w",
-            padx=14,
-            pady=11,
-            bg=ACCENT if primary else PANEL,
-            fg=INK if primary else PAPER,
-            activebackground=LIME if primary else PANEL_LIGHT,
-            activeforeground=INK if primary else PAPER,
-            relief="flat",
-            borderwidth=0,
-            font=(FONT, 10, "bold"),
-            cursor="hand2",
-            wraplength=460,
-            justify="left",
         )
         button.pack(fill="x", pady=4)
         return button
