@@ -5,6 +5,7 @@ from dataclasses import replace
 from math import isfinite
 import tkinter as tk
 from tkinter import messagebox
+from tkinter import ttk
 
 from brakes import BRAKE_CATALOG, available_brakes
 from cars import AVAILABLE_CARS
@@ -282,21 +283,12 @@ class BonnevilleApp(tk.Tk):
             font=(FONT, 11, "bold"),
         )
         self.header_title.pack(side="left", anchor="center")
-        tk.Button(
+        ttk.Button(
             bar,
             text="END TURN",
             command=self.end_turn,
-            bg=ACCENT,
-            fg=INK,
-            activebackground=LIME,
-            activeforeground=INK,
-            relief="flat",
-            borderwidth=0,
-            font=(FONT, 10, "bold"),
-            padx=16,
-            pady=8,
-            cursor="hand2",
         ).pack(side="right", anchor="center", padx=(16, 0))
+
         self.header_status = tk.Label(
             bar, text="", bg=INK, fg=LIME, font=(FONT, 10, "bold")
         )
