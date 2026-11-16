@@ -8,3 +8,6 @@ test_vehicle_diagnostics.log
 
 # Generated test output
 full_test_output.txt
+
+# macOS metadata
+.DS_Store
