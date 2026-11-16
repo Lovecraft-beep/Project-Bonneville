@@ -9,5 +9,9 @@ test_vehicle_diagnostics.log
 # Generated test output
 full_test_output.txt
 
+# Local Python virtual environments
+.venv/
+.venv-*/
+
 # macOS metadata
 .DS_Store
