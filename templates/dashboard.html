@@ -15,5 +15,10 @@
     <h2>Team</h2>
     <p>Name: {{ campaign.team.name }}</p>
     <p>Cash: £{{ "{:,.0f}".format(campaign.team.cash) }}</p>
+
+<form method="post" action="{{ url_for('end_turn') }}">
+    <button type="submit">End Turn</button>
+</form>
+
 </body>
 </html>
