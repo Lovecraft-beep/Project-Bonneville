@@ -67,5 +67,23 @@ class WebAdapterTests(unittest.TestCase):
             restored.campaign.turn_number,
             web.campaign_app.campaign.turn_number,
         )
+    def test_campaign_state_survives_application_restart(self):
+        web.campaign_app.advance_turn()
+
+        expected_turn = web.campaign_app.campaign.turn_number
+        expected_campaign_id = web.campaign_app.campaign.campaign_id
+        save_path = web.campaign_app.save_path
+
+        restarted_app = CampaignApplication(save_path)
+
+        self.assertEqual(
+            restarted_app.campaign.campaign_id,
+            expected_campaign_id,
+        )
+        self.assertEqual(
+            restarted_app.campaign.turn_number,
+            expected_turn,
+        )
+
 if __name__ == "__main__":
     unittest.main()
