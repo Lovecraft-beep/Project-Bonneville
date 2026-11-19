@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Project Bonneville</title>
+</head>
+<body>
+    <h1>Project Bonneville</h1>
+
+    <h2>Campaign</h2>
+    <p>Year: {{ campaign.current_year }}</p>
+    <p>Season: {{ campaign.current_season }}</p>
+    <p>Turn: {{ campaign.turn_number }}</p>
+
+    <h2>Team</h2>
+    <p>Name: {{ campaign.team.name }}</p>
+    <p>Cash: £{{ "{:,.0f}".format(campaign.team.cash) }}</p>
+</body>
+</html>
