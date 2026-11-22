@@ -84,6 +84,45 @@ class WebAdapterTests(unittest.TestCase):
             restarted_app.campaign.turn_number,
             expected_turn,
         )
+    def test_new_campaign_confirmation_is_read_only(self):
+        campaign_id = web.campaign_app.campaign.campaign_id
+        turn_number = web.campaign_app.campaign.turn_number
 
+        response = self.client.get("/new")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Start a New Campaign?", response.data)
+        self.assertEqual(
+            web.campaign_app.campaign.campaign_id,
+            campaign_id,
+        )
+        self.assertEqual(
+            web.campaign_app.campaign.turn_number,
+            turn_number,
+        )
+    def test_new_campaign_resets_persists_and_redirects(self):
+        web.campaign_app.advance_turn()
+        old_campaign_id = web.campaign_app.campaign.campaign_id
+        save_path = web.campaign_app.save_path
+
+        self.assertGreater(web.campaign_app.campaign.turn_number, 1)
+
+        response = self.client.post("/new")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/")
+        self.assertNotEqual(
+            web.campaign_app.campaign.campaign_id,
+            old_campaign_id,
+        )
+        self.assertEqual(web.campaign_app.campaign.turn_number, 1)
+        self.assertTrue(save_path.exists())
+
+        restored = CampaignApplication(save_path)
+        self.assertEqual(
+            restored.campaign.campaign_id,
+            web.campaign_app.campaign.campaign_id,
+        )
+        self.assertEqual(restored.campaign.turn_number, 1)
 if __name__ == "__main__":
     unittest.main()

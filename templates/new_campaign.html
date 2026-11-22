@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>New Campaign | Project Bonneville</title>
+</head>
+<body>
+    <h1>Start a New Campaign?</h1>
+
+    <p>
+        The current campaign is on turn {{ campaign.turn_number }},
+        {{ campaign.current_season }} {{ campaign.current_year }}.
+    </p>
+
+    <p>
+        Starting a new campaign will replace the current saved campaign.
+    </p>
+
+<form method="post" action="{{ url_for('new_campaign') }}">
+    <button type="submit">Yes, Start New Campaign</button>
+</form>
+
+    <p>
+        <a href="{{ url_for('dashboard') }}">Cancel and return to Dashboard</a>
+    </p>
+</body>
+</html>

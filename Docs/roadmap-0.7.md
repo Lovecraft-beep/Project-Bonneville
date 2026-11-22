@@ -546,7 +546,7 @@ Development branch:
 - [x] A browser can display campaign status.
 - [ ] A browser interaction can explicitly create/load a campaign.
 - [x] A browser interaction can advance a campaign turn.
-- [ ] State survives a Flask application restart and is explicitly verified.
+- [x] State survives a Flask application restart and is explicitly verified.
 - [x] Legacy Tkinter remains independent of the Flask adapter.
 - [x] Full regression suite remains green.
 - [ ] 0.7c web-adapter architecture and operation are documented.

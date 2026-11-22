@@ -7,7 +7,6 @@ from application import CampaignApplication
 app = Flask(__name__)
 campaign_app = CampaignApplication()
 
-
 @app.get("/health")
 def health():
     return "Project Bonneville: OK"
@@ -19,6 +18,20 @@ def dashboard():
         "dashboard.html",
         campaign=campaign_app.summary(),
     )
+
+
+@app.get("/new")
+def new_campaign_confirmation():
+    return render_template(
+        "new_campaign.html",
+        campaign=campaign_app.summary(),
+    )
+
+@app.post("/new")
+def new_campaign():
+    campaign_app.new_campaign()
+    campaign_app.save()
+    return redirect(url_for("dashboard"))
 
 @app.post("/turn")
 def end_turn():
