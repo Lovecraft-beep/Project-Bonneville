@@ -131,7 +131,7 @@ Further large-scale Tkinter restyling is explicitly deferred. Project Bonneville
 
 ## 0.7c - First Web Adapter
 
-**Status: In progress**
+**Status: Complete**
 
 Objective: prove that the application layer can be driven over HTTP without coupling web behaviour to the game engine.
 
@@ -200,8 +200,8 @@ Development branch:
 - [x] State survives a Flask application restart and is explicitly verified.
 - [x] Legacy Tkinter remains independent of the Flask adapter.
 - [x] Full regression suite passes: 207 tests.
-- [ ] 0.7c web-adapter architecture and operation are documented.
-- [ ] Final 0.7c roadmap checkpoint is committed and pushed.
+- [x] 0.7c web-adapter architecture and operation are documented.
+- [x] Final 0.7c roadmap checkpoint is committed and pushed.
 
 ---
 
