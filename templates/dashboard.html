@@ -1,24 +1,50 @@
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Project Bonneville</title>
-</head>
-<body>
-    <h1>Project Bonneville</h1>
+{% extends "base.html" %}
 
-    <h2>Campaign</h2>
-    <p>Year: {{ campaign.current_year }}</p>
-    <p>Season: {{ campaign.current_season }}</p>
-    <p>Turn: {{ campaign.turn_number }}</p>
+{% block title %}Dashboard | Project Bonneville{% endblock %}
 
-    <h2>Team</h2>
-    <p>Name: {{ campaign.team.name }}</p>
-    <p>Cash: £{{ "{:,.0f}".format(campaign.team.cash) }}</p>
+{% block content %}
+<h1>Campaign Control</h1>
 
-<form method="post" action="{{ url_for('end_turn') }}">
-    <button type="submit">End Turn</button>
-</form>
+<div class="dashboard-grid">
+    <section class="card">
+        <h2>Campaign</h2>
 
-</body>
-</html>
+        <p class="metric">
+            Year: <strong>{{ campaign.current_year }}</strong>
+        </p>
+
+        <p class="metric">
+            Season: <strong>{{ campaign.current_season }}</strong>
+        </p>
+
+        <p class="metric">
+            Turn: <strong>{{ campaign.turn_number }}</strong>
+        </p>
+    </section>
+
+    <section class="card">
+        <h2>Team</h2>
+
+        <p class="metric">
+            Name: <strong>{{ campaign.team.name }}</strong>
+        </p>
+
+        <p class="metric">
+            Cash: <strong>£{{ "{:,.0f}".format(campaign.team.cash) }}</strong>
+        </p>
+    </section>
+</div>
+
+<div class="actions">
+    <form method="post" action="{{ url_for('end_turn') }}">
+        <button type="submit">End Turn</button>
+    </form>
+
+    <a
+        class="button button-secondary"
+        href="{{ url_for('new_campaign_confirmation') }}"
+    >
+        New Campaign
+    </a>
+</div>
+{% endblock %}

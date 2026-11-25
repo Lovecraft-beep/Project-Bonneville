@@ -1,0 +1,120 @@
+:root {
+    --ink: #171b19;
+    --panel: #272e2a;
+    --panel-light: #343c37;
+    --paper: #f0efe7;
+    --muted: #adb6ae;
+    --accent: #d87352;
+    --lime: #c9dc79;
+    --line: #4a554d;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.5;
+}
+
+header {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 1.25rem 2rem;
+    border-bottom: 1px solid var(--line);
+}
+
+header strong {
+    font-family: Georgia, serif;
+    font-size: 1.35rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+header span {
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+main {
+    width: min(1100px, calc(100% - 3rem));
+    margin: 0 auto;
+    padding: 3rem 0;
+}
+
+h1 {
+    margin: 0 0 2rem;
+    font-family: Georgia, serif;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.card {
+    padding: 1.4rem;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+.card h2 {
+    margin-top: 0;
+    color: var(--accent);
+    font-size: 0.8rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.metric {
+    margin: 0.35rem 0;
+}
+
+.metric strong {
+    color: var(--lime);
+}
+
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 2rem;
+}
+
+button,
+.button {
+    display: inline-block;
+    padding: 0.75rem 1.1rem;
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    background: var(--accent);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.button-secondary {
+    background: transparent;
+    color: var(--paper);
+    border-color: var(--line);
+}
+
+button:hover,
+.button:hover {
+    background: var(--lime);
+    border-color: var(--lime);
+    color: var(--ink);
+}
