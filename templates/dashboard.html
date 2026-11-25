@@ -33,6 +33,31 @@
             Cash: <strong>£{{ "{:,.0f}".format(campaign.team.cash) }}</strong>
         </p>
     </section>
+
+        <section class="card">
+        <h2>World Record</h2>
+
+        {% if campaign.world_record.speed_mph %}
+        <p class="metric">
+            Speed:
+            <strong>
+                {{ "{:.2f}".format(campaign.world_record.speed_mph) }} mph
+            </strong>
+        </p>
+
+        <p class="metric">
+            Holder: <strong>{{ campaign.world_record.holder }}</strong>
+        </p>
+
+        <p class="metric">
+            Year: <strong>{{ campaign.world_record.year }}</strong>
+        </p>
+        {% else %}
+        <p class="metric">
+            <strong>No standing record yet</strong>
+        </p>
+        {% endif %}
+    </section>
 </div>
 
 <div class="actions">
