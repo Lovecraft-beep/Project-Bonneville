@@ -133,5 +133,27 @@ class WebAdapterTests(unittest.TestCase):
         self.assertIn(b"Aerodynamics", response.data)
         self.assertIn(b"Engineering Resources", response.data)
 
+    def test_select_research_program_persists_and_redirects(self):
+        era = web.campaign_app.campaign.current_era
+        save_path = web.campaign_app.save_path
+
+        response = self.client.post(
+            "/research/program",
+            data={"program_id": "aerodynamic_pioneer"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/research")
+        self.assertEqual(
+            web.campaign_app.campaign.development_programs[era],
+            "aerodynamic_pioneer",
+        )
+
+        restored = CampaignApplication(save_path)
+        self.assertEqual(
+            restored.campaign.development_programs[era],
+            "aerodynamic_pioneer",
+        )
+
 if __name__ == "__main__":
     unittest.main()

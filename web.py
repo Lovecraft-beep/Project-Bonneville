@@ -1,6 +1,6 @@
 """Project Bonneville web adapter."""
 
-from flask import Flask, redirect, render_template, url_for
+from flask import Flask, redirect, render_template, request, url_for
 
 from application import CampaignApplication
 
@@ -44,3 +44,10 @@ def research():
         "research.html",
         research=campaign_app.research_summary(),
     )
+
+@app.post("/research/program")
+def select_research_program():
+    campaign_app.select_development_program(
+        request.form["program_id"]
+    )
+    return redirect(url_for("research"))

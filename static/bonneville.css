@@ -220,3 +220,18 @@ nav {
     color: var(--lime) !important;
     font-size: 0.85rem;
 }
+
+.programme-choice {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+}
+
+.programme-choice h3 {
+    margin: 0 0 0.35rem;
+    font-family: Georgia, serif;
+}
+
+.programme-choice p {
+    color: var(--muted);
+}

@@ -27,10 +27,33 @@
         <p class="metric">
             <strong>{{ research.selected_development_program }}</strong>
         </p>
-        {% else %}
         <p class="metric">
-            <strong>No programme selected</strong>
+            Programme committed for the current era.
         </p>
+        {% else %}
+        <p>
+            Choose the team's engineering direction for the current era.
+            This commitment cannot be changed until the next era.
+        </p>
+
+        {% for program in research.development_programs %}
+        <div class="programme-choice">
+            <h3>{{ program.name }}</h3>
+            <p>{{ program.description }}</p>
+
+            <form
+                method="post"
+                action="{{ url_for('select_research_program') }}"
+            >
+                <input
+                    type="hidden"
+                    name="program_id"
+                    value="{{ program.program_id }}"
+                >
+                <button type="submit">Commit Programme</button>
+            </form>
+        </div>
+        {% endfor %}
         {% endif %}
     </section>
 </div>
