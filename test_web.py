@@ -124,5 +124,14 @@ class WebAdapterTests(unittest.TestCase):
             web.campaign_app.campaign.campaign_id,
         )
         self.assertEqual(restored.campaign.turn_number, 1)
+
+    def test_research_page_renders_application_research_summary(self):
+        response = self.client.get("/research")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Research &amp; Development", response.data)
+        self.assertIn(b"Aerodynamics", response.data)
+        self.assertIn(b"Engineering Resources", response.data)
+
 if __name__ == "__main__":
     unittest.main()

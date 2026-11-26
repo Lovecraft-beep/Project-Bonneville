@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Research | Project Bonneville{% endblock %}
+
+{% block content %}
+<h1>Research &amp; Development</h1>
+
+<div class="dashboard-grid">
+    <section class="card">
+        <h2>Engineering Resources</h2>
+        <p class="metric">
+            Era: <strong>{{ research.current_era }}</strong>
+        </p>
+        <p class="metric">
+            Engineers available:
+            <strong>{{ research.available_engineers }} / {{ research.total_engineers }}</strong>
+        </p>
+        <p class="metric">
+            Cash: <strong>£{{ "{:,.0f}".format(research.cash) }}</strong>
+        </p>
+    </section>
+
+    <section class="card">
+        <h2>Development Programme</h2>
+
+        {% if research.selected_development_program %}
+        <p class="metric">
+            <strong>{{ research.selected_development_program }}</strong>
+        </p>
+        {% else %}
+        <p class="metric">
+            <strong>No programme selected</strong>
+        </p>
+        {% endif %}
+    </section>
+</div>
+
+{% if research.active_engineering_projects %}
+<section class="card research-section">
+    <h2>Active Projects</h2>
+
+    {% for project in research.active_engineering_projects %}
+    <div class="research-project">
+        <strong>{{ project.name }}</strong>
+        <span>
+            {{ project.turns_remaining }} turn(s) remaining
+        </span>
+    </div>
+    {% endfor %}
+</section>
+{% endif %}
+
+{% for branch_name, branch in research.branches.items() %}
+<section class="card research-section">
+    <h2>{{ branch_name }}</h2>
+
+    {% for technology in branch.technologies %}
+    <article class="technology">
+        <div>
+            <span class="technology-status">
+                {{ technology.era }} / {{ technology.status }}
+            </span>
+
+            <h3>{{ technology.name }}</h3>
+
+            <p>{{ technology.description }}</p>
+
+            <p class="technology-meta">
+                £{{ "{:,.0f}".format(technology.effective_project_cost) }}
+                /
+                {{ technology.engineers_required }} engineer(s)
+                /
+                {{ technology.effective_project_turns }} turn(s)
+            </p>
+        </div>
+    </article>
+    {% endfor %}
+</section>
+{% endfor %}
+{% endblock %}

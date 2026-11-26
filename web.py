@@ -37,3 +37,10 @@ def new_campaign():
 def end_turn():
     campaign_app.advance_turn()
     return redirect(url_for("dashboard"))
+
+@app.get("/research")
+def research():
+    return render_template(
+        "research.html",
+        research=campaign_app.research_summary(),
+    )
