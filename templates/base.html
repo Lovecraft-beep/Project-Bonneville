@@ -6,10 +6,22 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='bonneville.css') }}">
     <title>{% block title %}Project Bonneville{% endblock %}</title>
 </head>
+
 <body>
     <header>
-        <strong>Project Bonneville</strong>
-        <span>Racing Department</span>
+        <div class="brand">
+            <strong>Project Bonneville</strong>
+            <span>Racing Department</span>
+        </div>
+
+        <nav aria-label="Primary navigation">
+            <a class="nav-link active" href="{{ url_for('dashboard') }}">
+                Dashboard
+            </a>
+            <span class="nav-link disabled">Research</span>
+            <span class="nav-link disabled">Garage</span>
+            <span class="nav-link disabled">Team</span>
+        </nav>
     </header>
 
     <main>

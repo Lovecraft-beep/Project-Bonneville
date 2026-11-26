@@ -133,3 +133,48 @@ button:hover,
     color: var(--lime);
     font-style: italic;
 }
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+}
+
+nav {
+    display: flex;
+    gap: 0.35rem;
+    margin-left: auto;
+}
+
+.nav-link {
+    padding: 0.55rem 0.75rem;
+    border-radius: 4px;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    text-transform: uppercase;
+}
+
+.nav-link.active {
+    background: var(--panel);
+    color: var(--lime);
+}
+
+.nav-link.disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+@media (max-width: 760px) {
+    header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    nav {
+        flex-wrap: wrap;
+        margin-left: 0;
+    }
+}
