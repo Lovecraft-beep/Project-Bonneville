@@ -1,6 +1,7 @@
 """Tests for the UI-independent campaign application boundary."""
 
 import json
+from copy import deepcopy
 from pathlib import Path
 import subprocess
 import sys
@@ -124,6 +125,124 @@ class CampaignApplicationTests(unittest.TestCase):
             self.assertEqual(summary["headlines"], ["Test headline"])
             self.assertEqual(summary["reactions"], ["Test reaction"])
             json.dumps(summary)
+
+    def test_research_summary_is_json_serialisable_and_has_all_branches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = CampaignApplication(Path(directory) / "campaign.json")
+
+            summary = app.research_summary()
+
+            self.assertEqual(
+                set(summary["branches"]),
+                {"Engine", "Chassis", "Aerodynamics", "Gearbox", "Tyres", "Brakes"},
+            )
+            self.assertEqual(
+                set(summary),
+                {
+                    "current_era",
+                    "available_engineers",
+                    "total_engineers",
+                    "cash",
+                    "selected_development_program",
+                    "active_engineering_projects",
+                    "branches",
+                },
+            )
+            for branch in summary["branches"].values():
+                self.assertTrue(branch["technologies"])
+                for technology in branch["technologies"]:
+                    self.assertEqual(
+                        set(technology),
+                        {
+                            "technology_id",
+                            "name",
+                            "era",
+                            "description",
+                            "status",
+                            "effective_project_cost",
+                            "effective_project_turns",
+                            "engineers_required",
+                        },
+                    )
+            json.dumps(summary)
+
+    def test_opening_research_statuses_follow_existing_prerequisites(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = CampaignApplication(Path(directory) / "campaign.json")
+
+            summary = app.research_summary()
+
+            self.assertEqual(summary["selected_development_program"], None)
+            self.assertEqual(
+                summary["branches"]["Aerodynamics"]["technologies"][0]["status"],
+                "PROGRAM REQUIRED",
+            )
+            management.select_development_program(
+                app.campaign, "aerodynamic_pioneer"
+            )
+            available_summary = app.research_summary()
+            self.assertEqual(
+                available_summary["branches"]["Aerodynamics"]["technologies"][0][
+                    "status"
+                ],
+                "AVAILABLE",
+            )
+            for branch_name in (
+                "Engine",
+                "Chassis",
+                "Gearbox",
+                "Tyres",
+                "Brakes",
+            ):
+                self.assertEqual(
+                    available_summary["branches"][branch_name]["technologies"][0][
+                        "status"
+                    ],
+                    "LOCKED",
+                    branch_name,
+                )
+
+    def test_research_summary_tracks_project_and_completion_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = CampaignApplication(Path(directory) / "campaign.json")
+            management.select_development_program(
+                app.campaign, "aerodynamic_pioneer"
+            )
+            project = management.start_engineering_project(
+                app.campaign, "aerodynamics", "wind_deflector"
+            )
+
+            summary = app.research_summary()
+
+            self.assertEqual(
+                summary["branches"]["Aerodynamics"]["technologies"][0]["status"],
+                "IN PROGRESS",
+            )
+            self.assertEqual(
+                summary["active_engineering_projects"][0]["technology_id"],
+                "wind_deflector",
+            )
+            for _ in range(project.turns_remaining):
+                management.advance_turn(app.campaign)
+
+            completed_summary = app.research_summary()
+
+            self.assertEqual(
+                completed_summary["branches"]["Aerodynamics"]["technologies"][0][
+                    "status"
+                ],
+                "COMPLETE",
+            )
+            self.assertEqual(completed_summary["active_engineering_projects"], [])
+
+    def test_research_summary_does_not_mutate_campaign_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = CampaignApplication(Path(directory) / "campaign.json")
+            before = deepcopy(app.campaign)
+
+            app.research_summary()
+
+            self.assertEqual(app.campaign, before)
 
     def test_application_can_be_used_without_importing_ui_modules(self):
         script = """
