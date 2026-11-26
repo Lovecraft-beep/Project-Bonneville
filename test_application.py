@@ -317,5 +317,34 @@ assert "ui.app" not in sys.modules
             self.assertFalse(save_path.exists())
             self.assertEqual(app.campaign.development_programs, {})
 
+    def test_start_research_project_persists_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            save_path = Path(directory) / "campaign.json"
+            app = CampaignApplication(save_path)
+
+            app.select_development_program("aerodynamic_pioneer")
+
+            summary = app.research_summary()
+            aero = summary["branches"]["Aerodynamics"]
+            available = next(
+                technology
+                for technology in aero["technologies"]
+                if technology["status"] == "AVAILABLE"
+            )
+
+            project = app.start_research_project(
+                "aerodynamics",
+                available["technology_id"],
+            )
+
+            self.assertEqual(project.technology_id, available["technology_id"])
+            self.assertTrue(save_path.exists())
+
+            restored = CampaignApplication(save_path)
+            self.assertEqual(
+                restored.campaign.engineering_projects[0].technology_id,
+                available["technology_id"],
+            )
+
 if __name__ == "__main__":
     unittest.main()

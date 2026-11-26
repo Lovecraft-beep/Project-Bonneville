@@ -83,6 +83,16 @@ class CampaignApplication:
         self.save()
         return result
 
+    def start_research_project(self, branch, technology_id):
+        """Start and persist an engineering research project."""
+        project = management.start_engineering_project(
+            self.campaign,
+            branch,
+            technology_id,
+        )
+        self.save()
+        return project
+
     def research_summary(self):
         """Return a read-only, JSON-serialisable snapshot of research."""
         research = self.campaign.research
@@ -183,7 +193,10 @@ class CampaignApplication:
                         "engineers_required": technology.engineers_required,
                     }
                 )
-            branch_summaries[branch_name] = {"technologies": technologies}
+            branch_summaries[branch_name] = {
+                "branch_key": branch_key,
+                "technologies": technologies,
+            }
 
         return {
             "current_era": self.campaign.current_era,

@@ -155,5 +155,38 @@ class WebAdapterTests(unittest.TestCase):
             "aerodynamic_pioneer",
         )
 
+    def test_start_research_project_persists_and_redirects(self):
+        web.campaign_app.select_development_program("aerodynamic_pioneer")
+
+        summary = web.campaign_app.research_summary()
+        branch = summary["branches"]["Aerodynamics"]
+        available = next(
+            technology
+            for technology in branch["technologies"]
+            if technology["status"] == "AVAILABLE"
+        )
+
+        response = self.client.post(
+            "/research/start",
+            data={
+                "branch": branch["branch_key"],
+                "technology_id": available["technology_id"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/research")
+
+        self.assertEqual(
+            web.campaign_app.campaign.engineering_projects[0].technology_id,
+            available["technology_id"],
+        )
+
+        restored = CampaignApplication(web.campaign_app.save_path)
+        self.assertEqual(
+            restored.campaign.engineering_projects[0].technology_id,
+            available["technology_id"],
+        )
+        
 if __name__ == "__main__":
     unittest.main()

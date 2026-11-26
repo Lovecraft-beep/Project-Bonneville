@@ -95,6 +95,23 @@
                 /
                 {{ technology.effective_project_turns }} turn(s)
             </p>
+                        {% if technology.status == "AVAILABLE" %}
+            <form method="post" action="{{ url_for('start_research_project') }}">
+                <input
+                    type="hidden"
+                    name="branch"
+                    value="{{ branch_name | lower }}"
+                >
+                <input
+                    type="hidden"
+                    name="technology_id"
+                    value="{{ technology.technology_id }}"
+                >
+                <button type="submit">Start Project</button>
+            </form>
+            {% elif technology.status == "IN PROGRESS" %}
+            <p class="technology-progress">Project in progress</p>
+            {% endif %}
         </div>
     </article>
     {% endfor %}

@@ -51,3 +51,11 @@ def select_research_program():
         request.form["program_id"]
     )
     return redirect(url_for("research"))
+
+@app.post("/research/start")
+def start_research_project():
+    campaign_app.start_research_project(
+        request.form["branch"],
+        request.form["technology_id"],
+    )
+    return redirect(url_for("research"))
