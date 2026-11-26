@@ -74,6 +74,15 @@ class CampaignApplication:
             "reactions": list(self.campaign.world.reactions),
         }
 
+    def select_development_program(self, program_id):
+        """Select and persist the major development programme for the current era."""
+        result = management.select_development_program(
+            self.campaign,
+            program_id,
+        )
+        self.save()
+        return result
+
     def research_summary(self):
         """Return a read-only, JSON-serialisable snapshot of research."""
         research = self.campaign.research
@@ -184,6 +193,14 @@ class CampaignApplication:
             "selected_development_program": self.campaign.development_programs.get(
                 self.campaign.current_era
             ),
+            "development_programs": [
+                {
+                    "program_id": program_id,
+                    "name": program["name"],
+                    "description": program["description"],
+                }
+                for program_id, program in management.DEVELOPMENT_PROGRAMS.items()
+            ],
             "active_engineering_projects": [
                 {
                     "branch": project.branch,

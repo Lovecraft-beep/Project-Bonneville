@@ -144,6 +144,7 @@ class CampaignApplicationTests(unittest.TestCase):
                     "total_engineers",
                     "cash",
                     "selected_development_program",
+                    "development_programs",
                     "active_engineering_projects",
                     "branches",
                 },
@@ -269,6 +270,52 @@ assert "ui.app" not in sys.modules
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_research_summary_exposes_development_program_choices(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = CampaignApplication(Path(directory) / "campaign.json")
+
+            summary = app.research_summary()
+
+            self.assertEqual(len(summary["development_programs"]), 3)
+            self.assertEqual(
+                {item["program_id"] for item in summary["development_programs"]},
+                {
+                    "aerodynamic_pioneer",
+                    "power_gambler",
+                    "engineering_perfectionist",
+                },
+            )
+            json.dumps(summary)
+
+    def test_select_development_program_persists_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            save_path = Path(directory) / "campaign.json"
+            app = CampaignApplication(save_path)
+            era = app.campaign.current_era
+
+            app.select_development_program("aerodynamic_pioneer")
+
+            self.assertEqual(
+                app.campaign.development_programs[era],
+                "aerodynamic_pioneer",
+            )
+
+            restored = CampaignApplication(save_path)
+            self.assertEqual(
+                restored.campaign.development_programs[era],
+                "aerodynamic_pioneer",
+            )
+
+    def test_select_development_program_rejects_invalid_choice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            save_path = Path(directory) / "campaign.json"
+            app = CampaignApplication(save_path)
+
+            with self.assertRaises(ValueError):
+                app.select_development_program("not_a_real_program")
+
+            self.assertFalse(save_path.exists())
+            self.assertEqual(app.campaign.development_programs, {})
 
 if __name__ == "__main__":
     unittest.main()
