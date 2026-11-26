@@ -12,11 +12,9 @@
         <p class="metric">
             Year: <strong>{{ campaign.current_year }}</strong>
         </p>
-
         <p class="metric">
             Season: <strong>{{ campaign.current_season }}</strong>
         </p>
-
         <p class="metric">
             Turn: <strong>{{ campaign.turn_number }}</strong>
         </p>
@@ -28,27 +26,34 @@
         <p class="metric">
             Name: <strong>{{ campaign.team.name }}</strong>
         </p>
-
         <p class="metric">
             Cash: <strong>£{{ "{:,.0f}".format(campaign.team.cash) }}</strong>
         </p>
+        <p class="metric">
+            Reputation: <strong>{{ "{:.1f}".format(campaign.team.reputation) }}</strong>
+        </p>
+        <p class="metric">
+            Engineers: <strong>{{ campaign.team.engineers }}</strong>
+        </p>
+        <p class="metric">
+            Mechanics: <strong>{{ campaign.team.mechanics }}</strong>
+        </p>
+        <p class="metric">
+            Workshop: <strong>Level {{ campaign.team.workshop_level }}</strong>
+        </p>
     </section>
 
-        <section class="card">
+    <section class="card">
         <h2>World Record</h2>
 
         {% if campaign.world_record.speed_mph %}
         <p class="metric">
             Speed:
-            <strong>
-                {{ "{:.2f}".format(campaign.world_record.speed_mph) }} mph
-            </strong>
+            <strong>{{ "{:.2f}".format(campaign.world_record.speed_mph) }} mph</strong>
         </p>
-
         <p class="metric">
             Holder: <strong>{{ campaign.world_record.holder }}</strong>
         </p>
-
         <p class="metric">
             Year: <strong>{{ campaign.world_record.year }}</strong>
         </p>
@@ -59,6 +64,24 @@
         {% endif %}
     </section>
 </div>
+
+<section class="card world-news">
+    <h2>World News</h2>
+
+    {% if campaign.headlines %}
+        {% for headline in campaign.headlines[-5:] | reverse %}
+        <p class="headline">{{ headline }}</p>
+        {% endfor %}
+    {% else %}
+        <p class="metric">No headlines yet.</p>
+    {% endif %}
+
+    {% if campaign.reactions %}
+    <p class="reaction">
+        {{ campaign.reactions[-1] }}
+    </p>
+    {% endif %}
+</section>
 
 <div class="actions">
     <form method="post" action="{{ url_for('end_turn') }}">

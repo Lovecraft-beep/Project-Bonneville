@@ -118,3 +118,18 @@ button:hover,
     border-color: var(--lime);
     color: var(--ink);
 }
+
+.world-news {
+    margin-top: 1rem;
+}
+
+.headline {
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.reaction {
+    margin-top: 1rem;
+    color: var(--lime);
+    font-style: italic;
+}
